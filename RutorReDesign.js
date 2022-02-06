@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Rutor hide menu
+// @name         Rutor ReDesign
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      1.0
 // @description  Скрывает ненужные пункты меню
 // @author       Me
 // @match        http://rutor.is/new

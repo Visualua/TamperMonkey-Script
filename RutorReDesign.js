@@ -2,8 +2,9 @@
 // @name         Rutor ReDesign
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Скрывает ненужные пункты меню
-// @author       Me
+// @description  Скрывает ненужные пункты меню, подсветка годов (текущий/предыдущий), убраны всякие мелочи
+// @author       
+// @icon         https://www.google.com/s2/favicons?domain=rutor.is
 // @match        http://rutor.is/new
 // @require      http://code.jquery.com/jquery-3.4.1.min.js
 // @grant        none
@@ -31,6 +32,24 @@ $('.menu_b').remove();
 
 // Вход
 $('.logout').remove();
+
+//Подсветка годов
+    var Year = new Date().getFullYear();
+    var Highlight = [
+        Year, Year-1,
+];
+    for (var k in Highlight) {
+       if (Highlight[k] == Year) {
+$('tr:has(a:contains('+Highlight[k]+'))').addClass('HighlightText');
+$(".HighlightText").css("background-color", "rgba(0, 194, 0, 0.20)");
+        }
+      if (Highlight[k] == Year-1) {
+$('tr:has(a:contains('+Highlight[k]+'))').addClass('HighlightTextOld');
+$(".HighlightTextOld").css("background-color", "rgba(230, 245, 39, 0.20)");
+       }
+}
+
+
 
 // Название Категорий
 var Tags = [

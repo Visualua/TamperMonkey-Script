@@ -1,0 +1,1303 @@
+// ==UserScript==
+// @name         RuTracker DarkTheme 1.0
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Dark Theme for RuTracker with hidelist
+// @author       0x0056
+// @match        *://rutracker.org/forum/viewforum.php*
+// @match        *://rutracker.net/forum/viewforum.php*
+// @match        *://*.rutracker.org/forum/viewforum.php*
+// @match        *://*.rutracker.net/forum/viewforum.php*
+// @match        *://rutracker.org/forum/viewtopic.php*
+// @match        *://rutracker.net/forum/viewtopic.php*
+// @match        *://*.rutracker.org/forum/viewtopic.php*
+// @match        *://*.rutracker.net/forum/viewtopic.php*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Загружаем список скрытых раздач
+    let hiddenTorrents = GM_getValue('hiddenTorrents', {});
+
+    // Общие стили для стекломорфного дизайна
+    GM_addStyle(`
+        :root {
+            --main-bg-color: #0f0f1a;
+            --card-bg-color: rgba(27, 28, 49, 0.6);
+            --card-bg-hover: rgba(37, 38, 69, 0.7);
+            --accent-color: #6c5ce7;
+            --accent-secondary: #3498db;
+            --accent-gradient: linear-gradient(135deg, #6c5ce7, #3498db);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-color: #ffffff;
+            --secondary-text-color: rgba(255, 255, 255, 0.7);
+            --danger-color: #e74c3c;
+            --success-color: #2ecc71;
+            --warning-color: #f39c12;
+            --glass-blur: blur(10px);
+            --glass-border: 1px solid rgba(255, 255, 255, 0.15);
+            --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            --border-radius: 14px;
+            --transition-speed: 0.3s;
+        }
+
+        /* Фоновый градиент */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background:
+                radial-gradient(circle at 20% 80%, rgba(108, 92, 231, 0.15), transparent 40%),
+                radial-gradient(circle at 80% 20%, rgba(52, 152, 219, 0.15), transparent 40%),
+                var(--main-bg-color);
+            z-index: -1;
+        }
+
+        body {
+            background-color: transparent !important;
+            color: var(--text-color) !important;
+            font-family: 'Inter', 'SF Pro Display', sans-serif !important;
+            margin: 0;
+            padding: 0;
+            letter-spacing: 0.2px;
+            line-height: 1.5;
+            position: relative;
+        }
+
+        a {
+            color: var(--accent-secondary) !important;
+            text-decoration: none !important;
+            transition: color var(--transition-speed);
+        }
+
+        a:hover {
+            color: #74b9ff !important;
+        }
+
+        #page_header {
+            background-color: transparent !important;
+            padding: 15px 0 !important;
+            box-shadow: none !important;
+        }
+
+        #main-nav {
+            background-color: var(--card-bg-color) !important;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border-radius: var(--border-radius) !important;
+            border: var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            margin: 0 20px !important;
+            padding: 15px 25px !important;
+        }
+
+        #logo {
+            padding: 20px 0 !important;
+        }
+
+        .topmenu {
+            background-color: transparent !important;
+            border-bottom: none !important;
+            padding: 10px 20px !important;
+        }
+
+        .forumline {
+            border-radius: var(--border-radius) !important;
+            overflow: hidden !important;
+            border: var(--glass-border) !important;
+            margin: 25px 0 !important;
+            background-color: var(--card-bg-color) !important;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow);
+        }
+
+        .vf-table {
+            border-radius: var(--border-radius) !important;
+            overflow: hidden !important;
+            border: var(--glass-border) !important;
+            margin-top: 30px !important;
+            background-color: var(--card-bg-color) !important;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow);
+        }
+
+        .row1 {
+            background-color: rgba(27, 28, 49, 0.4) !important;
+            border-bottom: var(--glass-border) !important;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        .row2 {
+            background-color: rgba(27, 28, 49, 0.2) !important;
+            border-bottom: var(--glass-border) !important;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        .row3 {
+            background: var(--accent-gradient) !important;
+            color: white !important;
+            padding: 15px 20px !important;
+            font-weight: bold !important;
+            letter-spacing: 0.5px !important;
+            font-size: 15px !important;
+            border: none !important;
+        }
+
+        /* Исправляем цвета для всех возможных элементов */
+        table.forumline,
+        #page_content,
+        #main_content,
+        #main_content_wrap,
+        #page_container,
+        #body_container {
+            background-color: transparent !important;
+            color: var(--text-color) !important;
+        }
+
+        /* Карточки торрентов */
+        tr.hl-tr {
+            transition: background-color var(--transition-speed) !important;
+        }
+
+        tr.hl-tr:hover {
+            background-color: var(--card-bg-hover) !important;
+        }
+
+        tr.hl-tr td {
+            border-color: var(--border-color) !important;
+            padding: 15px !important;
+            vertical-align: middle !important;
+        }
+
+        /* Исправление выравнивания текста раздачи и кнопки */
+        .torTopic {
+            display: flex !important;
+            align-items: center !important;
+            padding: 5px 0 !important;
+        }
+
+        /* Стили для фильтрации */
+        .filter-btn {
+            background-color: rgba(231, 76, 60, 0.2);
+            border: 1px solid rgba(231, 76, 60, 0.3);
+            cursor: pointer;
+            margin-right: 10px;
+            color: var(--danger-color);
+            font-size: 14px;
+            font-weight: bold;
+            width: 26px;
+            height: 26px;
+            min-width: 26px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            transition: all 0.3s;
+            box-shadow: 0 2px 10px rgba(231, 76, 60, 0.2);
+            order: -1;
+        }
+
+        .filter-btn:hover {
+            color: white;
+            background: var(--danger-color);
+            transform: scale(1.1);
+            border-color: transparent;
+            box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
+        }
+
+        /* Стили для окна управления фильтрами */
+        #filter-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(15, 15, 26, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        #filter-content {
+            background-color: var(--card-bg-color);
+            padding: 35px;
+            border-radius: var(--border-radius);
+            width: 650px;
+            max-width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        #filter-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: var(--glass-border);
+            padding-bottom: 15px;
+        }
+
+        #filter-header h2 {
+            margin: 0;
+            color: var(--text-color);
+            font-size: 26px;
+            font-weight: 700;
+        }
+
+        #filter-close {
+            background: rgba(255, 255, 255, 0.1);
+            border: var(--glass-border);
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-color);
+            transition: all 0.3s;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        #filter-close:hover {
+            background: var(--danger-color);
+            transform: rotate(90deg);
+        }
+
+        #filter-rules {
+            margin-bottom: 30px;
+        }
+
+        #filter-rules h3 {
+            color: var(--text-color);
+            margin-bottom: 15px;
+            font-size: 18px;
+            position: relative;
+            padding-left: 15px;
+        }
+
+        #filter-rules h3:before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 5px;
+            height: 20px;
+            background: var(--accent-gradient);
+            border-radius: 3px;
+        }
+
+        .filter-rule {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: rgba(44, 46, 69, 0.5);
+            margin-bottom: 12px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+            border-left: 4px solid var(--accent-color);
+        }
+
+        .filter-rule:hover {
+            transform: translateX(5px);
+            background-color: rgba(44, 46, 69, 0.8);
+        }
+
+        .remove-rule {
+            background: var(--danger-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3);
+        }
+
+        .remove-rule:hover {
+            background-color: #c0392b;
+            transform: scale(1.05);
+        }
+
+        #add-filter-form {
+            display: flex;
+            margin-top: 25px;
+        }
+
+        #new-filter {
+            flex-grow: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 10px 0 0 10px;
+            background-color: rgba(44, 46, 69, 0.8);
+            color: var(--text-color);
+            font-size: 15px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        #add-filter-btn {
+            background: var(--accent-gradient);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 0 10px 10px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 14px;
+        }
+
+        #add-filter-btn:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .filter-counter {
+            background: var(--danger-color);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            margin-left: 10px;
+            box-shadow: 0 3px 6px rgba(231, 76, 60, 0.3);
+            font-weight: bold;
+        }
+
+        /* Стили для скрытых торрентов */
+        .hidden-torrent {
+            display: none !important;
+        }
+
+        /* Стили для кнопки вызова модалки фильтров */
+        #show-filter-modal {
+            background: var(--danger-color);
+            color: white !important;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-right: 20px;
+            display: flex;
+            align-items: center;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+            transition: all 0.3s;
+            letter-spacing: 0.5px;
+            font-size: 14px;
+        }
+
+        #show-filter-modal:hover {
+            background-color: #c0392b;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
+        }
+
+        .preset-filter-btn {
+            background-color: rgba(44, 46, 69, 0.8);
+            color: var(--text-color);
+            border: none;
+            padding: 12px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            font-weight: 500;
+        }
+
+        .preset-filter-btn:hover {
+            background: var(--accent-gradient);
+            color: white;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(108, 92, 231, 0.4);
+        }
+
+        /* Дополнительные элементы UI */
+        h2, h3 {
+            color: var(--text-color);
+            margin-top: 0;
+        }
+
+        .empty-rules {
+            color: var(--secondary-text-color);
+            font-style: italic;
+            padding: 20px;
+            text-align: center;
+            background-color: rgba(44, 46, 69, 0.5);
+            border-radius: 10px;
+            margin: 15px 0;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Улучшенные стили для форумных таблиц */
+        .forumline th {
+            background-color: rgba(44, 46, 69, 0.8) !important;
+            color: var(--text-color) !important;
+            border-bottom: 2px solid var(--accent-color) !important;
+            padding: 15px 10px !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.5px !important;
+            text-transform: uppercase !important;
+            font-size: 13px !important;
+        }
+
+        /* Улучшение видимости счетчиков и информации в таблицах */
+        .vf-col-replies, .vf-col-last-post {
+            color: var(--text-color) !important;
+            background-color: rgba(27, 28, 49, 0.4) !important;
+        }
+
+        .vf-col-replies p, .vf-col-last-post p {
+            color: var(--text-color) !important;
+            font-weight: 500 !important;
+        }
+
+        /* Стили для навигации */
+        .nav {
+            background-color: transparent !important;
+            padding: 5px 0 !important;
+        }
+
+        /* Стилизация полос прокрутки */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(27, 28, 49, 0.4);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--accent-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #8c7ae6;
+        }
+
+        /* Стили для улучшения читаемости торрент-заголовков */
+        .torTopic {
+            font-size: 15px !important;
+            font-weight: 500 !important;
+            line-height: 1.4 !important;
+        }
+
+        .tt-text {
+            transition: color 0.2s;
+        }
+
+        .tt-text:hover {
+            color: var(--accent-color) !important;
+        }
+
+        /* Стили для счетчиков сидов/личей */
+        .seedmed {
+            color: var(--success-color) !important;
+            font-weight: bold !important;
+        }
+
+        .leechmed {
+            color: var(--warning-color) !important;
+            font-weight: bold !important;
+        }
+
+        /* Стиль для меток тем */
+        .ttp-label {
+            background: var(--accent-gradient);
+            color: white !important;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 5px;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        /* Статусы торрентов */
+        .tor-approved {
+            color: var(--success-color) !important;
+            font-weight: bold !important;
+        }
+
+        .tor-not-approved {
+            color: var(--danger-color) !important;
+            font-weight: bold !important;
+        }
+
+        /* Выравнивание элементов в блоках */
+        .hl-tr td.vf-col-t-title {
+            padding: 10px 15px !important;
+        }
+
+        .hl-tr td.tCenter {
+            text-align: center !important;
+            vertical-align: middle !important;
+            padding: 10px !important;
+        }
+
+        /* Исправление проблемы белого фона при наведении */
+        tr.hl-tr:hover,
+        tr.hl-tr:hover td {
+            background-color: rgba(37, 38, 69, 0.7) !important;
+            border-color: var(--border-color) !important;
+        }
+
+        /* Прячем стандартный эффект наведения */
+        tr:hover > td.row1,
+        tr:hover > td.row2,
+        tr:hover > td.row4 {
+            background-color: rgba(37, 38, 69, 0.7) !important;
+        }
+
+        /* Важный фикс для светлого выделения при наведении */
+        .row4,
+        tr:hover > .row4,
+        .forumline .row4 {
+            background-color: rgba(37, 38, 69, 0.7) !important;
+        }
+
+        /* Явный фикс для белой строки в списке торрентов */
+        tr.hl-tr td.row4 {
+            background-color: rgba(37, 38, 69, 0.7) !important;
+        }
+        /* Исправление цвета имени пользователя */
+#logged-in-username {
+    color: var(--accent-secondary) !important;
+    font-weight: 500 !important;
+}
+
+#logged-in-username:hover {
+    color: #74b9ff !important;
+    text-decoration: underline !important;
+}
+/* Стилизация иконки выхода */
+.log-out-icon {
+    filter: brightness(0) saturate(100%) invert(67%) sepia(44%) saturate(3086%) hue-rotate(187deg) brightness(95%) contrast(90%) !important;
+    opacity: 0.8 !important;
+    transition: all 0.3s ease !important;
+    margin-right: 5px !important;
+}
+
+.log-out-icon:hover {
+    filter: brightness(0) saturate(100%) invert(77%) sepia(78%) saturate(414%) hue-rotate(179deg) brightness(102%) contrast(96%) !important;
+    opacity: 1 !important;
+    transform: scale(1.1) !important;
+    cursor: pointer !important;
+}
+
+        /* Исправление цвета имени пользователя */
+        .topicAuthor {
+            color: var(--accent-secondary) !important;
+            font-weight: 500 !important;
+        }
+
+        .topicAuthor:hover {
+            color: #74b9ff !important;
+            text-decoration: underline !important;
+        }
+
+        /* Стилизация полоски поиска */
+        input[type="text"],
+        input[type="search"],
+        #search-text,
+        #search-menu,
+        #search-submit,
+        select {
+            background-color: rgba(27, 28, 49, 0.6) !important;
+            color: var(--text-color) !important;
+            border: var(--glass-border) !important;
+            box-shadow: none !important;
+            border-radius: 8px !important;
+            padding: 5px 10px !important;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        #search-submit {
+            background: var(--accent-gradient) !important;
+            cursor: pointer !important;
+            color: white !important;
+            border: none !important;
+            transition: all 0.3s !important;
+        }
+
+        #search-submit:hover {
+            box-shadow: 0 4px 10px rgba(108, 92, 231, 0.3) !important;
+            transform: translateY(-2px) !important;
+        }
+
+        /* Стилизация строки поиска и кнопок в шапке */
+        #quick-search {
+            display: flex !important;
+            align-items: center !important;
+            background-color: transparent !important;
+        }
+
+        /* Стилизация всех форм ввода на странице */
+        input, select, button, .med, .buttonmed {
+            color: var(--text-color) !important;
+            background-color: rgba(27, 28, 49, 0.6) !important;
+            border: var(--glass-border) !important;
+            border-radius: 6px !important;
+            transition: all 0.3s !important;
+        }
+
+        /* Общее исправление проблем с белым фоном элементов */
+        div, span, p, a, td, th, input, select, textarea, button {
+            background-color: transparent !important;
+        }
+        /* Улучшение модального окна фильтров */
+#filter-modal {
+    background-color: rgba(10, 10, 18, 0.9) !important; /* Увеличиваем непрозрачность */
+    backdrop-filter: blur(15px) !important; /* Усиливаем размытие фона */
+    -webkit-backdrop-filter: blur(15px) !important;
+}
+
+#filter-content {
+    background-color: rgba(20, 21, 35, 0.95) !important; /* Более непрозрачный фон */
+    box-shadow: 0 0 25px rgba(108, 92, 231, 0.5), 0 0 15px rgba(52, 152, 219, 0.3) !important; /* Яркое свечение */
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    padding: 30px !important;
+}
+
+/* Улучшение контрастности и читаемости текста в модальном окне */
+#filter-content h2,
+#filter-content h3 {
+    text-shadow: 0 0 10px rgba(108, 92, 231, 0.7) !important;
+    margin-bottom: 15px !important;
+}
+
+/* Улучшение предустановленных кнопок фильтров */
+.preset-filter-btn {
+    min-width: 180px !important; /* Минимальная ширина */
+    white-space: nowrap !important; /* Текст не переносится */
+    overflow: hidden !important; /* Скрывать при переполнении */
+    text-overflow: ellipsis !important; /* Показывать многоточие */
+    margin-bottom: 10px !important;
+    padding: 12px 15px !important;
+}
+
+/* Улучшение поля ввода и кнопки */
+#new-filter {
+    padding: 15px 20px !important;
+    font-size: 16px !important;
+    height: 48px !important;
+}
+
+#add-filter-btn {
+    padding: 15px 25px !important;
+    font-size: 16px !important;
+    height: 48px !important;
+}
+
+/* Улучшение кнопки удаления фильтра */
+.remove-rule {
+    padding: 8px 18px !important;
+    margin-left: 15px !important;
+}
+
+/* Улучшение строки поиска */
+input[type="text"],
+input[type="search"],
+#search-text {
+    height: 38px !important;
+    min-width: 220px !important;
+}
+
+#search-menu {
+    height: 38px !important;
+}
+
+#search-submit {
+    height: 38px !important;
+    min-width: 100px !important;
+    padding: 0 15px !important;
+}
+
+/* Улучшение внешнего вида правил фильтрации */
+.filter-rule {
+    padding: 15px 20px !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-bottom: 12px !important;
+}
+
+.filter-rule span {
+    font-size: 15px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 380px !important;
+}
+.ttp-label.ttp-hot::before {
+        display: none !important;
+    }
+    /* Спойлеры */
+    .sp-wrap {
+        background: var(--background-card);
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        margin-bottom: 15px;
+    }
+
+    .sp-head {
+        background: rgba(37, 38, 69, 0.5);
+        padding: 15px 20px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .sp-head span {
+        color: var(--text-primary);
+        font-weight: 600;
+    }
+
+    .sp-body {
+        padding: 20px;
+        background: rgba(27, 28, 49, 0.4);
+        color: var(--text-primary);
+    }
+
+    `);
+
+    // Загружаем список скрытых раздач
+    function loadHiddenTorrents() {
+        return GM_getValue('hiddenTorrents', {});
+    }
+
+    // Сохраняем список скрытых раздач
+    function saveHiddenTorrents() {
+        GM_setValue('hiddenTorrents', hiddenTorrents);
+    }
+
+    // Добавляем кнопку управления фильтрами
+    const addFilterButton = () => {
+        // Ищем разные возможные места для вставки кнопки
+        const navTop = document.querySelector('.nav-top') ||
+              document.querySelector('.nav') ||
+              document.querySelector('.forumline');
+
+        if (!navTop) return; // Если ничего не найдено, выходим
+
+        const hiddenCount = Object.keys(hiddenTorrents).length;
+        const filterButton = document.createElement('button');
+        filterButton.id = 'show-filter-modal';
+        filterButton.innerHTML = `Фильтры ${hiddenCount > 0 ? `<span class="filter-counter">${hiddenCount}</span>` : ''}`;
+        filterButton.addEventListener('click', showFilterModal);
+
+        // Вставляем кнопку в зависимости от найденного элемента
+        if (navTop.classList.contains('forumline')) {
+            // Если это таблица форума, добавляем перед ней
+            navTop.parentNode.insertBefore(filterButton, navTop);
+        } else {
+            // В остальных случаях, пробуем вставить как раньше
+            navTop.parentNode.insertBefore(filterButton, navTop);
+        }
+    };
+
+    // Создаем модальное окно для управления фильтрами
+    const createFilterModal = () => {
+        const modal = document.createElement('div');
+        modal.id = 'filter-modal';
+
+        const content = document.createElement('div');
+        content.id = 'filter-content';
+
+        const header = document.createElement('div');
+        header.id = 'filter-header';
+
+        const title = document.createElement('h2');
+        title.textContent = 'Управление фильтрами';
+
+        const closeBtn = document.createElement('button');
+        closeBtn.id = 'filter-close';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+
+        const rulesSection = document.createElement('div');
+        rulesSection.id = 'filter-rules';
+
+        const rulesTitle = document.createElement('h3');
+        rulesTitle.textContent = 'Активные фильтры:';
+        rulesSection.appendChild(rulesTitle);
+
+        const rulesList = document.createElement('div');
+        rulesList.id = 'rules-list';
+
+        // Добавление предустановленных фильтров
+        const addPresetSection = document.createElement('div');
+        addPresetSection.innerHTML = `
+            <h3>Предустановленные фильтры:</h3>
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                <button id="filter-jpn" class="preset-filter-btn">Скрыть торренты с JPN</button>
+                <button id="filter-scene" class="preset-filter-btn">Скрыть [Scene]</button>
+                <button id="filter-portable" class="preset-filter-btn">Скрыть [Portable]</button>
+            </div>
+        `;
+
+        // Добавление произвольного фильтра
+        const addFilterForm = document.createElement('div');
+        addFilterForm.innerHTML = `
+            <h3>Добавить новый фильтр:</h3>
+            <div id="add-filter-form">
+                <input type="text" id="new-filter" placeholder="Введите текст для фильтрации...">
+                <button id="add-filter-btn">Добавить</button>
+            </div>
+        `;
+
+        // Собираем модальное окно
+        content.appendChild(header);
+        content.appendChild(rulesSection);
+        rulesSection.appendChild(rulesList);
+        content.appendChild(addPresetSection);
+        content.appendChild(addFilterForm);
+        modal.appendChild(content);
+
+        document.body.appendChild(modal);
+
+        // Добавляем обработчики для предустановленных фильтров
+        document.getElementById('filter-jpn').addEventListener('click', () => {
+            addFilter('JPN');
+            updateRulesList();
+            applyFilters();
+        });
+
+        document.getElementById('filter-scene').addEventListener('click', () => {
+            addFilter('[Scene]');
+            updateRulesList();
+            applyFilters();
+        });
+
+        document.getElementById('filter-portable').addEventListener('click', () => {
+            addFilter('[Portable]');
+            updateRulesList();
+            applyFilters();
+        });
+
+        // Обработчик для добавления произвольного фильтра
+        document.getElementById('add-filter-btn').addEventListener('click', () => {
+            const newFilter = document.getElementById('new-filter').value.trim();
+            if (newFilter) {
+                addFilter(newFilter);
+                document.getElementById('new-filter').value = '';
+                updateRulesList();
+                applyFilters();
+            }
+        });
+
+        // Закрытие модального окна при клике вне содержимого
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+
+        return modal;
+    };
+
+    // Показываем модальное окно фильтров
+    const showFilterModal = () => {
+        updateRulesList();
+        const modal = document.getElementById('filter-modal');
+        modal.style.display = 'flex';
+    };
+
+    // Обновляем список правил в модальном окне
+    const updateRulesList = () => {
+        const rulesList = document.getElementById('rules-list');
+        rulesList.innerHTML = '';
+
+        const hiddenCount = Object.keys(hiddenTorrents).length;
+
+        if (hiddenCount === 0) {
+            rulesList.innerHTML = '<div class="empty-rules">Нет активных фильтров</div>';
+            return;
+        }
+
+        for (const [key, value] of Object.entries(hiddenTorrents)) {
+            const ruleItem = document.createElement('div');
+            ruleItem.className = 'filter-rule';
+
+            const ruleText = document.createElement('span');
+            ruleText.textContent = `"${key}" (скрыто: ${value.count})`;
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-rule';
+            removeBtn.textContent = 'Удалить';
+            removeBtn.dataset.rule = key;
+            removeBtn.addEventListener('click', () => {
+                removeFilter(key);
+                updateRulesList();
+                applyFilters();
+            });
+
+            ruleItem.appendChild(ruleText);
+            ruleItem.appendChild(removeBtn);
+            rulesList.appendChild(ruleItem);
+        }
+    };
+
+    // Добавляем фильтр
+    const addFilter = (filterText) => {
+        if (!hiddenTorrents[filterText]) {
+            hiddenTorrents[filterText] = { count: 0 };
+        }
+        saveHiddenTorrents();
+    };
+
+    // Удаляем фильтр
+    const removeFilter = (filterText) => {
+        delete hiddenTorrents[filterText];
+        saveHiddenTorrents();
+
+        // Показываем ранее скрытые торренты
+        document.querySelectorAll('.hidden-torrent').forEach(row => {
+            if (row.dataset.hiddenBy === filterText) {
+                row.classList.remove('hidden-torrent');
+                delete row.dataset.hiddenBy;
+            }
+        });
+
+        // Обновляем счетчик на кнопке
+        updateFilterCounter();
+    };
+
+    // Применяем фильтры ко всем торрентам
+    const applyFilters = () => {
+        // Сбрасываем счетчики
+        for (const key in hiddenTorrents) {
+            hiddenTorrents[key].count = 0;
+        }
+
+        // Получаем все строки с торрентами
+        const torrentRows = document.querySelectorAll('tr.hl-tr');
+
+        torrentRows.forEach(row => {
+            // Сначала отображаем все строки
+            row.classList.remove('hidden-torrent');
+            delete row.dataset.hiddenBy;
+
+            // Получаем название торрента
+            const titleElement = row.querySelector('.torTopic a.tt-text');
+            if (!titleElement) return;
+
+            const title = titleElement.textContent;
+
+            // Проверяем все фильтры
+            for (const [filterText, filterData] of Object.entries(hiddenTorrents)) {
+                if (title.includes(filterText)) {
+                    row.classList.add('hidden-torrent');
+                    row.dataset.hiddenBy = filterText;
+                    hiddenTorrents[filterText].count++;
+                    break; // Прерываем цикл, т.к. уже скрыли торрент
+                }
+            }
+        });
+
+        // Сохраняем обновленные данные
+        saveHiddenTorrents();
+
+        // Обновляем счетчик на кнопке
+        updateFilterCounter();
+    };
+
+    // Обновляем счетчик на кнопке вызова фильтров
+    const updateFilterCounter = () => {
+        const filterButton = document.getElementById('show-filter-modal');
+        if (!filterButton) return;
+
+        const hiddenCount = Object.keys(hiddenTorrents).length;
+
+        if (hiddenCount > 0) {
+            filterButton.innerHTML = `Фильтры <span class="filter-counter">${hiddenCount}</span>`;
+        } else {
+            filterButton.textContent = 'Фильтры';
+        }
+    };
+
+    // Добавляем кнопки фильтрации к каждому торренту
+    const addFilterButtons = () => {
+        const torrentRows = document.querySelectorAll('tr.hl-tr');
+
+        torrentRows.forEach(row => {
+            const titleElement = row.querySelector('.torTopic a.tt-text');
+            if (!titleElement) return;
+
+            // Проверяем, не добавлена ли уже кнопка
+            if (row.querySelector('.filter-btn')) return;
+
+            const filterBtn = document.createElement('button');
+            filterBtn.className = 'filter-btn';
+            filterBtn.innerHTML = '−'; // Красный минус
+            filterBtn.title = 'Скрыть похожие раздачи';
+
+            filterBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const title = titleElement.textContent;
+
+                // Определяем имя раздачи для фильтрации
+                // Ищем текст между [DL] и [P] или [L]
+                const regex = /\[DL\]\s+([^[]+)/;
+                const match = title.match(regex);
+
+                if (match && match[1]) {
+                    const filterName = match[1].trim();
+                    addFilter(filterName);
+                    applyFilters();
+                    updateRulesList();
+                    alert(`Добавлен фильтр: "${filterName}"`);
+                } else {
+                    // Если не смогли найти по паттерну, предлагаем ввести вручную
+                    const userInput = prompt('Введите текст для фильтрации:', '');
+                    if (userInput) {
+                        addFilter(userInput.trim());
+                        applyFilters();
+                        updateRulesList();
+                    }
+                }
+            });
+
+            const torTopicDiv = titleElement.parentNode;
+            torTopicDiv.insertBefore(filterBtn, torTopicDiv.firstChild);
+        });
+    };
+
+    function replaceIconWithStar() {
+        const icons = document.querySelectorAll('.topic_icon[src$="folder_dl_new.gif"], .topic_icon[src$="folder_dl.gif"]');
+        icons.forEach(icon => {
+            const starSpan = document.createElement('span');
+            starSpan.textContent = '⭐';
+            starSpan.style.fontSize = '18px';
+            starSpan.style.marginRight = '5px';
+
+            // Покраска в серый цвет для старой иконки
+            if (icon.src.includes('folder_dl.gif')) {
+                starSpan.style.filter = 'grayscale(100%)';
+                starSpan.style.color = 'gray';
+            }
+
+            icon.parentNode.insertBefore(starSpan, icon);
+            icon.remove();
+        });
+
+        // Замена иконки закрепленной темы на предупреждение
+        const stickyIcons = document.querySelectorAll('.topic_icon[src$="folder_sticky_new.gif"]');
+        stickyIcons.forEach(icon => {
+            const warningSpan = document.createElement('span');
+            warningSpan.textContent = '⚠️';
+            warningSpan.style.fontSize = '18px';
+            warningSpan.style.marginRight = '5px';
+
+            icon.parentNode.insertBefore(warningSpan, icon);
+            icon.remove();
+        });
+
+        // Замена иконки закрытой темы на замок
+        const lockedIcons = document.querySelectorAll('.topic_icon[src$="folder_lock.gif"]');
+        lockedIcons.forEach(icon => {
+            const lockSpan = document.createElement('span');
+            lockSpan.textContent = '🔒';
+            lockSpan.style.fontSize = '18px';
+            lockSpan.style.marginRight = '5px';
+
+            icon.parentNode.insertBefore(lockSpan, icon);
+            icon.remove();
+        });
+
+        // Замена иконки закрытой темы на замок
+        const lockedIcons2 = document.querySelectorAll('.topic_icon[src$="folder_announce.gif"]');
+        lockedIcons2.forEach(icon => {
+            const lockSpan2 = document.createElement('span');
+            lockSpan2.textContent = '⚠️';
+            lockSpan2.style.fontSize = '18px';
+            lockSpan2.style.marginRight = '5px';
+
+            icon.parentNode.insertBefore(lockSpan2, icon);
+            icon.remove();
+        });
+    }
+
+    function hideButton() {
+        const xpaths = [
+            '//*[@id="main_content_wrap"]/table[1]/tbody/tr/td[1]/table/tbody/tr/td[1]',
+            '//*[@id="main_content_wrap"]/table[4]/tbody/tr/td[1]/a',
+            '//*[@id="nav-panel"]',
+            '//*[@id="main_content_wrap"]/table[3]/tbody/tr[58]/td/form',
+            '//*[@id="jumpbox-wrap"]/select',
+            '//*[@id="footer-info-links"]',
+            '//*[@id="main_content_wrap"]/table[4]/tbody/tr/td[2]',
+            '//*[@id="page_footer"]/div[4]',
+            '//*[@id="main_content_wrap"]/div/div[3]/ul/li/a',
+            '//*[@id="main_content_wrap"]/table[1]/tbody/tr/td[1]/div[3]',
+            '//*[@id="main_content_wrap"]/table[1]/tbody/tr/td[1]/div[1]',
+            '//*[@id="main_content_wrap"]/table[2]'
+        ];
+
+        const selectors = [
+
+            'a.t-is-unread > img' // Универсальный селектор для всех подобных изображений
+        ];
+
+        xpaths.forEach(xpath => {
+            const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
+            if (element) {
+                element.style.display = 'none';
+            }
+        });
+
+        selectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+
+            elements.forEach(element => {
+                element.style.display = 'none';
+            });
+        });
+    }
+
+    function replaceHotLabel() {
+        // Замена "горячей" метки
+        const hotLabels = document.querySelectorAll('span.ttp-label.ttp-hot');
+
+        hotLabels.forEach(label => {
+            label.textContent = '🔥';
+            label.style.fontSize = '18px';
+            label.style.position = 'static';
+        });
+
+        // Замена "Опрос"
+        const pollLabels = document.querySelectorAll('span.topicPoll');
+
+        pollLabels.forEach(label => {
+            label.textContent = '📑';
+            label.style.fontSize = '18px';
+        });
+    }
+
+    function hideElements() {
+        // Проверяем, что мы на странице торрента с параметром t=
+        if (window.location.href.includes('viewtopic.php?t=')) {
+            const xpaths = [
+                '//*[@id="main_content_wrap"]/div[1]',
+                '//*[@id="topic_main"]/tbody[1]',
+                '//*[@id="post-msg-form"]',
+                '//*[@id="show-filter-modal"]',
+                '//*[@id="forum-moderators"]',
+                '//*[@id="main_content_wrap"]/table[5]',
+                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[3]',
+                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[4]',
+                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[5]',
+                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[2]/td[1]',
+                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[2]/td[2]',
+                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[1]',
+                '//*[@id="thx-btn-div"]',
+                '//*[@id="thx-block"]/div[2]'
+            ];
+
+            xpaths.forEach(xpath => {
+                try {
+                    const element = document.evaluate(
+                        xpath,
+                        document,
+                        null,
+                        XPathResult.FIRST_ORDERED_NODE_TYPE,
+                        null
+                    ).singleNodeValue;
+
+                    if (element) {
+                        element.style.display = 'none';
+                    }
+                } catch (error) {
+                    console.error(`Error finding element with xpath: ${xpath}`, error);
+                }
+            });
+        }
+    }
+
+
+
+    // Инициализация скрипта
+    const init = () => {
+        // Загружаем сохраненные фильтры
+        hiddenTorrents = loadHiddenTorrents();
+
+        // Создаем модальное окно
+        createFilterModal();
+
+        // Замена иконок
+        replaceIconWithStar();
+
+        // Добавляем кнопку управления фильтрами
+        addFilterButton();
+
+
+        hideElements();
+
+        //Замена меток
+        replaceHotLabel();
+
+        // Скрытие ненужного
+        hideButton();
+
+        // Добавляем кнопки фильтрации к торрентам
+        addFilterButtons();
+
+        // Применяем сохраненные фильтры
+        applyFilters();
+
+        // Обновляем список правил
+        updateRulesList();
+    };
+
+    // Запускаем после загрузки DOM
+    document.addEventListener('DOMContentLoaded', init);
+
+    // Если DOM уже загружен, запускаем сразу
+    if (document.readyState === 'interactive' || document.readyState === 'complete') {
+        init();
+    }
+})();

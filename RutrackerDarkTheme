@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         RuTracker DarkTheme 1.0
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Dark Theme for RuTracker with hidelist
+// @version      2.0
+// @description  Современная тёмная тема RuTracker: узкая колонка, карточки раздач, фильтры со списком, «Отменить», автоподгрузка страниц
 // @author       0x0056
 // @match        *://rutracker.org/forum/viewforum.php*
 // @match        *://rutracker.net/forum/viewforum.php*
@@ -15,1289 +15,714 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
+// @run-at       document-start
 // ==/UserScript==
 
-(function() {
+/*
+ * Хранилище совместимо с 1.0: GM_getValue('hiddenTorrents') = { "текст": {count, kw?} }.
+ *   - правило без kw — НАЗВАНИЕ игры: скрывает раздачу, если название (или одно из названий через « / ») совпадает
+ *     с правилом без учёта регистра, либо правило встречается в заголовке целым словом;
+ *   - kw: true — «слово»: скрывает, если встречается в заголовке где угодно (так работали JPN, [Scene], [Portable]).
+ */
+(function () {
     'use strict';
 
-    // Загружаем список скрытых раздач
-    let hiddenTorrents = GM_getValue('hiddenTorrents', {});
+    const IS_TOPIC = /viewtopic\.php/.test(location.pathname);
+    const PRESETS = ['JPN', '[Scene]', '[Portable]'];
+    const AUTOLOAD_MIN_VISIBLE = 20;   // догружать следующие страницы, пока видно меньше стольких раздач
+    const AUTOLOAD_MAX_PAGES = 6;
 
-    // Общие стили для стекломорфного дизайна
+    let rules = GM_getValue('hiddenTorrents', {});
+    for (const p of PRESETS) if (rules[p]) rules[p].kw = true;
+    let showHidden = GM_getValue('rtShowHidden', false);
+    const save = () => GM_setValue('hiddenTorrents', rules);
+
+    // ------------------------------------------------------------------ стили
     GM_addStyle(`
-        :root {
-            --main-bg-color: #0f0f1a;
-            --card-bg-color: rgba(27, 28, 49, 0.6);
-            --card-bg-hover: rgba(37, 38, 69, 0.7);
-            --accent-color: #6c5ce7;
-            --accent-secondary: #3498db;
-            --accent-gradient: linear-gradient(135deg, #6c5ce7, #3498db);
-            --border-color: rgba(255, 255, 255, 0.1);
-            --text-color: #ffffff;
-            --secondary-text-color: rgba(255, 255, 255, 0.7);
-            --danger-color: #e74c3c;
-            --success-color: #2ecc71;
-            --warning-color: #f39c12;
-            --glass-blur: blur(10px);
-            --glass-border: 1px solid rgba(255, 255, 255, 0.15);
-            --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            --border-radius: 14px;
-            --transition-speed: 0.3s;
-        }
-
-        /* Фоновый градиент */
-        body::before {
-            content: "";
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background:
-                radial-gradient(circle at 20% 80%, rgba(108, 92, 231, 0.15), transparent 40%),
-                radial-gradient(circle at 80% 20%, rgba(52, 152, 219, 0.15), transparent 40%),
-                var(--main-bg-color);
-            z-index: -1;
-        }
-
-        body {
-            background-color: transparent !important;
-            color: var(--text-color) !important;
-            font-family: 'Inter', 'SF Pro Display', sans-serif !important;
-            margin: 0;
-            padding: 0;
-            letter-spacing: 0.2px;
-            line-height: 1.5;
-            position: relative;
-        }
-
-        a {
-            color: var(--accent-secondary) !important;
-            text-decoration: none !important;
-            transition: color var(--transition-speed);
-        }
-
-        a:hover {
-            color: #74b9ff !important;
-        }
-
-        #page_header {
-            background-color: transparent !important;
-            padding: 15px 0 !important;
-            box-shadow: none !important;
-        }
-
-        #main-nav {
-            background-color: var(--card-bg-color) !important;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            border-radius: var(--border-radius) !important;
-            border: var(--glass-border);
-            box-shadow: var(--glass-shadow);
-            margin: 0 20px !important;
-            padding: 15px 25px !important;
-        }
-
-        #logo {
-            padding: 20px 0 !important;
-        }
-
-        .topmenu {
-            background-color: transparent !important;
-            border-bottom: none !important;
-            padding: 10px 20px !important;
-        }
-
-        .forumline {
-            border-radius: var(--border-radius) !important;
-            overflow: hidden !important;
-            border: var(--glass-border) !important;
-            margin: 25px 0 !important;
-            background-color: var(--card-bg-color) !important;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            box-shadow: var(--glass-shadow);
-        }
-
-        .vf-table {
-            border-radius: var(--border-radius) !important;
-            overflow: hidden !important;
-            border: var(--glass-border) !important;
-            margin-top: 30px !important;
-            background-color: var(--card-bg-color) !important;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            box-shadow: var(--glass-shadow);
-        }
-
-        .row1 {
-            background-color: rgba(27, 28, 49, 0.4) !important;
-            border-bottom: var(--glass-border) !important;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-        }
-
-        .row2 {
-            background-color: rgba(27, 28, 49, 0.2) !important;
-            border-bottom: var(--glass-border) !important;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-        }
-
-        .row3 {
-            background: var(--accent-gradient) !important;
-            color: white !important;
-            padding: 15px 20px !important;
-            font-weight: bold !important;
-            letter-spacing: 0.5px !important;
-            font-size: 15px !important;
-            border: none !important;
-        }
-
-        /* Исправляем цвета для всех возможных элементов */
-        table.forumline,
-        #page_content,
-        #main_content,
-        #main_content_wrap,
-        #page_container,
-        #body_container {
-            background-color: transparent !important;
-            color: var(--text-color) !important;
-        }
-
-        /* Карточки торрентов */
-        tr.hl-tr {
-            transition: background-color var(--transition-speed) !important;
-        }
-
-        tr.hl-tr:hover {
-            background-color: var(--card-bg-hover) !important;
-        }
-
-        tr.hl-tr td {
-            border-color: var(--border-color) !important;
-            padding: 15px !important;
-            vertical-align: middle !important;
-        }
-
-        /* Исправление выравнивания текста раздачи и кнопки */
-        .torTopic {
-            display: flex !important;
-            align-items: center !important;
-            padding: 5px 0 !important;
-        }
-
-        /* Стили для фильтрации */
-        .filter-btn {
-            background-color: rgba(231, 76, 60, 0.2);
-            border: 1px solid rgba(231, 76, 60, 0.3);
-            cursor: pointer;
-            margin-right: 10px;
-            color: var(--danger-color);
-            font-size: 14px;
-            font-weight: bold;
-            width: 26px;
-            height: 26px;
-            min-width: 26px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            border-radius: 50%;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            transition: all 0.3s;
-            box-shadow: 0 2px 10px rgba(231, 76, 60, 0.2);
-            order: -1;
-        }
-
-        .filter-btn:hover {
-            color: white;
-            background: var(--danger-color);
-            transform: scale(1.1);
-            border-color: transparent;
-            box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
-        }
-
-        /* Стили для окна управления фильтрами */
-        #filter-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(15, 15, 26, 0.7);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-        }
-
-        #filter-content {
-            background-color: var(--card-bg-color);
-            padding: 35px;
-            border-radius: var(--border-radius);
-            width: 650px;
-            max-width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            border: var(--glass-border);
-            box-shadow: var(--glass-shadow);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-        }
-
-        #filter-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: var(--glass-border);
-            padding-bottom: 15px;
-        }
-
-        #filter-header h2 {
-            margin: 0;
-            color: var(--text-color);
-            font-size: 26px;
-            font-weight: 700;
-        }
-
-        #filter-close {
-            background: rgba(255, 255, 255, 0.1);
-            border: var(--glass-border);
-            font-size: 24px;
-            cursor: pointer;
-            color: var(--text-color);
-            transition: all 0.3s;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            border-radius: 50%;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-        }
-
-        #filter-close:hover {
-            background: var(--danger-color);
-            transform: rotate(90deg);
-        }
-
-        #filter-rules {
-            margin-bottom: 30px;
-        }
-
-        #filter-rules h3 {
-            color: var(--text-color);
-            margin-bottom: 15px;
-            font-size: 18px;
-            position: relative;
-            padding-left: 15px;
-        }
-
-        #filter-rules h3:before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 5px;
-            height: 20px;
-            background: var(--accent-gradient);
-            border-radius: 3px;
-        }
-
-        .filter-rule {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 20px;
-            background-color: rgba(44, 46, 69, 0.5);
-            margin-bottom: 12px;
-            border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s;
-            border-left: 4px solid var(--accent-color);
-        }
-
-        .filter-rule:hover {
-            transform: translateX(5px);
-            background-color: rgba(44, 46, 69, 0.8);
-        }
-
-        .remove-rule {
-            background: var(--danger-color);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 8px 15px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: bold;
-            box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3);
-        }
-
-        .remove-rule:hover {
-            background-color: #c0392b;
-            transform: scale(1.05);
-        }
-
-        #add-filter-form {
-            display: flex;
-            margin-top: 25px;
-        }
-
-        #new-filter {
-            flex-grow: 1;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 10px 0 0 10px;
-            background-color: rgba(44, 46, 69, 0.8);
-            color: var(--text-color);
-            font-size: 15px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        #add-filter-btn {
-            background: var(--accent-gradient);
-            color: white;
-            border: none;
-            padding: 12px 25px;
-            border-radius: 0 10px 10px 0;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-size: 14px;
-        }
-
-        #add-filter-btn:hover {
-            opacity: 0.9;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        }
-
-        .filter-counter {
-            background: var(--danger-color);
-            color: white;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            margin-left: 10px;
-            box-shadow: 0 3px 6px rgba(231, 76, 60, 0.3);
-            font-weight: bold;
-        }
-
-        /* Стили для скрытых торрентов */
-        .hidden-torrent {
-            display: none !important;
-        }
-
-        /* Стили для кнопки вызова модалки фильтров */
-        #show-filter-modal {
-            background: var(--danger-color);
-            color: white !important;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 10px;
-            cursor: pointer;
-            margin-right: 20px;
-            display: flex;
-            align-items: center;
-            font-weight: bold;
-            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
-            transition: all 0.3s;
-            letter-spacing: 0.5px;
-            font-size: 14px;
-        }
-
-        #show-filter-modal:hover {
-            background-color: #c0392b;
-            transform: translateY(-3px);
-            box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
-        }
-
-        .preset-filter-btn {
-            background-color: rgba(44, 46, 69, 0.8);
-            color: var(--text-color);
-            border: none;
-            padding: 12px 20px;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-            font-weight: 500;
-        }
-
-        .preset-filter-btn:hover {
-            background: var(--accent-gradient);
-            color: white;
-            transform: translateY(-3px);
-            box-shadow: 0 6px 20px rgba(108, 92, 231, 0.4);
-        }
-
-        /* Дополнительные элементы UI */
-        h2, h3 {
-            color: var(--text-color);
-            margin-top: 0;
-        }
-
-        .empty-rules {
-            color: var(--secondary-text-color);
-            font-style: italic;
-            padding: 20px;
-            text-align: center;
-            background-color: rgba(44, 46, 69, 0.5);
-            border-radius: 10px;
-            margin: 15px 0;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Улучшенные стили для форумных таблиц */
-        .forumline th {
-            background-color: rgba(44, 46, 69, 0.8) !important;
-            color: var(--text-color) !important;
-            border-bottom: 2px solid var(--accent-color) !important;
-            padding: 15px 10px !important;
-            font-weight: 600 !important;
-            letter-spacing: 0.5px !important;
-            text-transform: uppercase !important;
-            font-size: 13px !important;
-        }
-
-        /* Улучшение видимости счетчиков и информации в таблицах */
-        .vf-col-replies, .vf-col-last-post {
-            color: var(--text-color) !important;
-            background-color: rgba(27, 28, 49, 0.4) !important;
-        }
-
-        .vf-col-replies p, .vf-col-last-post p {
-            color: var(--text-color) !important;
-            font-weight: 500 !important;
-        }
-
-        /* Стили для навигации */
-        .nav {
-            background-color: transparent !important;
-            padding: 5px 0 !important;
-        }
-
-        /* Стилизация полос прокрутки */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: rgba(27, 28, 49, 0.4);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--accent-color);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: #8c7ae6;
-        }
-
-        /* Стили для улучшения читаемости торрент-заголовков */
-        .torTopic {
-            font-size: 15px !important;
-            font-weight: 500 !important;
-            line-height: 1.4 !important;
-        }
-
-        .tt-text {
-            transition: color 0.2s;
-        }
-
-        .tt-text:hover {
-            color: var(--accent-color) !important;
-        }
-
-        /* Стили для счетчиков сидов/личей */
-        .seedmed {
-            color: var(--success-color) !important;
-            font-weight: bold !important;
-        }
-
-        .leechmed {
-            color: var(--warning-color) !important;
-            font-weight: bold !important;
-        }
-
-        /* Стиль для меток тем */
-        .ttp-label {
-            background: var(--accent-gradient);
-            color: white !important;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            margin-right: 5px;
-            text-transform: uppercase;
-            font-weight: bold;
-            letter-spacing: 0.5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-
-        /* Статусы торрентов */
-        .tor-approved {
-            color: var(--success-color) !important;
-            font-weight: bold !important;
-        }
-
-        .tor-not-approved {
-            color: var(--danger-color) !important;
-            font-weight: bold !important;
-        }
-
-        /* Выравнивание элементов в блоках */
-        .hl-tr td.vf-col-t-title {
-            padding: 10px 15px !important;
-        }
-
-        .hl-tr td.tCenter {
-            text-align: center !important;
-            vertical-align: middle !important;
-            padding: 10px !important;
-        }
-
-        /* Исправление проблемы белого фона при наведении */
-        tr.hl-tr:hover,
-        tr.hl-tr:hover td {
-            background-color: rgba(37, 38, 69, 0.7) !important;
-            border-color: var(--border-color) !important;
-        }
-
-        /* Прячем стандартный эффект наведения */
-        tr:hover > td.row1,
-        tr:hover > td.row2,
-        tr:hover > td.row4 {
-            background-color: rgba(37, 38, 69, 0.7) !important;
-        }
-
-        /* Важный фикс для светлого выделения при наведении */
-        .row4,
-        tr:hover > .row4,
-        .forumline .row4 {
-            background-color: rgba(37, 38, 69, 0.7) !important;
-        }
-
-        /* Явный фикс для белой строки в списке торрентов */
-        tr.hl-tr td.row4 {
-            background-color: rgba(37, 38, 69, 0.7) !important;
-        }
-        /* Исправление цвета имени пользователя */
-#logged-in-username {
-    color: var(--accent-secondary) !important;
-    font-weight: 500 !important;
-}
-
-#logged-in-username:hover {
-    color: #74b9ff !important;
-    text-decoration: underline !important;
-}
-/* Стилизация иконки выхода */
-.log-out-icon {
-    filter: brightness(0) saturate(100%) invert(67%) sepia(44%) saturate(3086%) hue-rotate(187deg) brightness(95%) contrast(90%) !important;
-    opacity: 0.8 !important;
-    transition: all 0.3s ease !important;
-    margin-right: 5px !important;
-}
-
-.log-out-icon:hover {
-    filter: brightness(0) saturate(100%) invert(77%) sepia(78%) saturate(414%) hue-rotate(179deg) brightness(102%) contrast(96%) !important;
-    opacity: 1 !important;
-    transform: scale(1.1) !important;
-    cursor: pointer !important;
-}
-
-        /* Исправление цвета имени пользователя */
-        .topicAuthor {
-            color: var(--accent-secondary) !important;
-            font-weight: 500 !important;
-        }
-
-        .topicAuthor:hover {
-            color: #74b9ff !important;
-            text-decoration: underline !important;
-        }
-
-        /* Стилизация полоски поиска */
-        input[type="text"],
-        input[type="search"],
-        #search-text,
-        #search-menu,
-        #search-submit,
-        select {
-            background-color: rgba(27, 28, 49, 0.6) !important;
-            color: var(--text-color) !important;
-            border: var(--glass-border) !important;
-            box-shadow: none !important;
-            border-radius: 8px !important;
-            padding: 5px 10px !important;
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-        }
-
-        #search-submit {
-            background: var(--accent-gradient) !important;
-            cursor: pointer !important;
-            color: white !important;
-            border: none !important;
-            transition: all 0.3s !important;
-        }
-
-        #search-submit:hover {
-            box-shadow: 0 4px 10px rgba(108, 92, 231, 0.3) !important;
-            transform: translateY(-2px) !important;
-        }
-
-        /* Стилизация строки поиска и кнопок в шапке */
-        #quick-search {
-            display: flex !important;
-            align-items: center !important;
-            background-color: transparent !important;
-        }
-
-        /* Стилизация всех форм ввода на странице */
-        input, select, button, .med, .buttonmed {
-            color: var(--text-color) !important;
-            background-color: rgba(27, 28, 49, 0.6) !important;
-            border: var(--glass-border) !important;
-            border-radius: 6px !important;
-            transition: all 0.3s !important;
-        }
-
-        /* Общее исправление проблем с белым фоном элементов */
-        div, span, p, a, td, th, input, select, textarea, button {
-            background-color: transparent !important;
-        }
-        /* Улучшение модального окна фильтров */
-#filter-modal {
-    background-color: rgba(10, 10, 18, 0.9) !important; /* Увеличиваем непрозрачность */
-    backdrop-filter: blur(15px) !important; /* Усиливаем размытие фона */
-    -webkit-backdrop-filter: blur(15px) !important;
-}
-
-#filter-content {
-    background-color: rgba(20, 21, 35, 0.95) !important; /* Более непрозрачный фон */
-    box-shadow: 0 0 25px rgba(108, 92, 231, 0.5), 0 0 15px rgba(52, 152, 219, 0.3) !important; /* Яркое свечение */
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-    padding: 30px !important;
-}
-
-/* Улучшение контрастности и читаемости текста в модальном окне */
-#filter-content h2,
-#filter-content h3 {
-    text-shadow: 0 0 10px rgba(108, 92, 231, 0.7) !important;
-    margin-bottom: 15px !important;
-}
-
-/* Улучшение предустановленных кнопок фильтров */
-.preset-filter-btn {
-    min-width: 180px !important; /* Минимальная ширина */
-    white-space: nowrap !important; /* Текст не переносится */
-    overflow: hidden !important; /* Скрывать при переполнении */
-    text-overflow: ellipsis !important; /* Показывать многоточие */
-    margin-bottom: 10px !important;
-    padding: 12px 15px !important;
-}
-
-/* Улучшение поля ввода и кнопки */
-#new-filter {
-    padding: 15px 20px !important;
-    font-size: 16px !important;
-    height: 48px !important;
-}
-
-#add-filter-btn {
-    padding: 15px 25px !important;
-    font-size: 16px !important;
-    height: 48px !important;
-}
-
-/* Улучшение кнопки удаления фильтра */
-.remove-rule {
-    padding: 8px 18px !important;
-    margin-left: 15px !important;
-}
-
-/* Улучшение строки поиска */
-input[type="text"],
-input[type="search"],
-#search-text {
-    height: 38px !important;
-    min-width: 220px !important;
-}
-
-#search-menu {
-    height: 38px !important;
-}
-
-#search-submit {
-    height: 38px !important;
-    min-width: 100px !important;
-    padding: 0 15px !important;
-}
-
-/* Улучшение внешнего вида правил фильтрации */
-.filter-rule {
-    padding: 15px 20px !important;
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: center !important;
-    margin-bottom: 12px !important;
-}
-
-.filter-rule span {
-    font-size: 15px !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    max-width: 380px !important;
-}
-.ttp-label.ttp-hot::before {
-        display: none !important;
+    :root {
+        --bg: #0a0c12; --surface: #11141d; --surface-2: #161a25; --surface-3: #1d2230;
+        --line: rgba(255,255,255,.07); --line-2: rgba(255,255,255,.12);
+        --text: #e7e9f0; --muted: #8a90a6; --faint: #5d6377;
+        --accent: #8b7bff; --accent-2: #39c6f4; --grad: linear-gradient(135deg, #8b7bff 0%, #39c6f4 100%);
+        --green: #3ddc97; --orange: #ffb547; --red: #ff5c7a;
+        --r: 14px; --r-sm: 9px;
+        --font: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        --shadow: 0 10px 30px rgba(0,0,0,.35);
+        color-scheme: dark;
     }
-    /* Спойлеры */
+    html, body { background: var(--bg) !important; }
+    body {
+        color: var(--text) !important; font: 14px/1.5 var(--font) !important; letter-spacing: .1px;
+        margin: 0 !important; -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+        content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+        background:
+            radial-gradient(900px 500px at 15% -10%, rgba(139,123,255,.13), transparent 60%),
+            radial-gradient(800px 500px at 100% 0%, rgba(57,198,244,.09), transparent 60%),
+            var(--bg);
+    }
+    /* убираем белые фоны сайта, но только внутри страницы */
+    :where(#body_container) :where(div, span, p, td, th, table, tr, tbody, ul, li, fieldset, legend, label) {
+        background-color: transparent !important; border-color: var(--line) !important;
+    }
+    #body_container, #page_container, #page_content, #main_content, #main_content_wrap { background: transparent !important; }
+    #page_container { max-width: 1440px !important; margin: 0 auto !important; padding: 0 28px 60px !important; box-sizing: border-box; }
+    a, a:visited { color: #b9b1ff !important; text-decoration: none !important; transition: color .15s; }
+    a:hover { color: #fff !important; }
+    ::selection { background: rgba(139,123,255,.45); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #262b3b; border-radius: 10px; border: 2px solid var(--bg); }
+    ::-webkit-scrollbar-thumb:hover { background: #343a50; }
+
+    /* шапка */
+    #page_header { background: transparent !important; box-shadow: none !important; }
+    #main-nav {
+        position: sticky; top: 0; z-index: 50; margin: 0 -28px 8px !important; padding: 10px 28px !important;
+        background: rgba(10,12,18,.72) !important; backdrop-filter: blur(14px) saturate(140%);
+        border: 0 !important; border-bottom: 1px solid var(--line) !important; border-radius: 0 !important;
+    }
+    #main-nav a { color: var(--muted) !important; font-weight: 500; }
+    #main-nav a:hover { color: var(--text) !important; }
+    #logo { padding: 14px 0 6px !important; }
+    #logo img { height: 34px !important; width: auto !important; filter: saturate(1.1); }
+    .topmenu { background: transparent !important; border: 0 !important; padding: 6px 0 !important; }
+    #logged-in-username { color: var(--text) !important; font-weight: 600 !important; }
+    .log-out-icon { filter: invert(1) opacity(.55) !important; }
+
+    /* поля ввода и кнопки сайта */
+    #body_container input[type="text"], #body_container input[type="search"], #body_container input[type="password"],
+    #body_container select, #body_container textarea {
+        background: var(--surface-2) !important; color: var(--text) !important; border: 1px solid var(--line-2) !important;
+        border-radius: var(--r-sm) !important; padding: 7px 11px !important; font: inherit !important; outline: none !important;
+        box-shadow: none !important; transition: border-color .15s, box-shadow .15s;
+    }
+    #body_container input:focus, #body_container select:focus, #body_container textarea:focus {
+        border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(139,123,255,.2) !important;
+    }
+    #body_container input[type="submit"], #body_container input[type="button"], #body_container button:not(.rtm-btn):not(.rtm-icon):not(.rtm-hide),
+    #search-submit {
+        background: var(--surface-3) !important; color: var(--text) !important; border: 1px solid var(--line-2) !important;
+        border-radius: var(--r-sm) !important; padding: 7px 14px !important; cursor: pointer; font: 500 13px var(--font) !important;
+    }
+    #search-submit { background: var(--grad) !important; border: 0 !important; color: #fff !important; }
+    #search-text { min-width: 260px !important; }
+
+    /* общие таблицы форума */
+    .forumline, .vf-table {
+        background: var(--surface) !important; border: 1px solid var(--line) !important; border-radius: var(--r) !important;
+        overflow: hidden; box-shadow: var(--shadow); border-collapse: separate !important;
+    }
+    .forumline th, .vf-table th, .thHead {
+        background: var(--surface-2) !important; color: var(--muted) !important; font: 600 11px var(--font) !important;
+        text-transform: uppercase; letter-spacing: .08em; padding: 10px 12px !important; border: 0 !important;
+        border-bottom: 1px solid var(--line) !important;
+    }
+    .row1, .row2, .row4, .row5, .prow1, .prow2 { background: transparent !important; }
+    .row3, td.catTitle, td.cat {
+        background: var(--surface-2) !important; color: var(--text) !important; border: 0 !important;
+        font: 600 13px var(--font) !important; padding: 10px 14px !important;
+    }
+    .maintitle, h1.maintitle { font: 700 26px/1.25 var(--font) !important; letter-spacing: -.3px; margin: 10px 0 6px !important; }
+    .maintitle a { color: var(--text) !important; }
+    .nav, .nav a { color: var(--muted) !important; font-size: 13px; }
+    .nav a:hover { color: var(--text) !important; }
+    .seedmed, .seed, .seedmed b { color: var(--green) !important; }
+    .leechmed, .leech, .leechmed b { color: var(--orange) !important; }
+    .tor-approved { color: var(--green) !important; }
+    .tor-not-approved, .tor-dup { color: var(--red) !important; }
+
+    /* ------------------------------------------------ список раздач (viewforum) */
+    table.vf-tor { display: block !important; background: transparent !important; border: 0 !important; box-shadow: none !important; overflow: visible; }
+    table.vf-tor > colgroup, table.vf-tor > thead, table.vf-tor > tbody > tr:first-child:has(th) { display: none !important; }
+    table.vf-tor > tbody { display: flex !important; flex-direction: column; gap: 8px; }
+    table.vf-tor > tbody > tr:not(.hl-tr) > td { display: block; }
+    table.vf-tor > tbody > tr:not(.hl-tr) > td.row3, table.vf-tor > tbody > tr:not(.hl-tr) > td.catTitle {
+        background: transparent !important; color: var(--muted) !important; padding: 14px 4px 2px !important;
+        font: 600 11px var(--font) !important; text-transform: uppercase; letter-spacing: .1em;
+    }
+    tr.hl-tr {
+        display: grid !important; grid-template-columns: 34px minmax(0,1fr) 150px 92px 140px 56px; align-items: center;
+        background: var(--surface) !important; border: 1px solid var(--line); border-radius: var(--r);
+        transition: border-color .15s, background .15s, transform .15s, opacity .2s; position: relative;
+    }
+    tr.hl-tr:hover { background: var(--surface-2) !important; border-color: var(--line-2); }
+    tr.hl-tr > td { display: block; border: 0 !important; padding: 12px 10px !important; background: transparent !important; }
+    /* сайт подсвечивает ячейки при наведении (tr.hl-tr:hover td { #f8f8f8 !important }) и выделенные строки — перебиваем */
+    #body_container tr.hl-tr > td, #body_container tr.hl-tr:hover > td, #body_container tr.hl-tr[class] > td,
+    #body_container .hl-selected-row td, #body_container .hl-sel-row-2 td, #body_container .hl-sel-row-3 td,
+    #body_container .p-body tr:hover { background: transparent !important; background-color: transparent !important; }
+    #body_container tr.hl-tr.hl-selected-row, #body_container tr.hl-tr.hl-sel-row-2, #body_container tr.hl-tr.hl-sel-row-3 {
+        background: var(--surface-2) !important; border-color: rgba(139,123,255,.45) !important; }
+    tr.hl-tr > td.vf-col-icon { padding-left: 14px !important; text-align: center; opacity: .8; }
+    tr.hl-tr .topic_icon { display: none !important; }
+    tr.hl-tr .t-is-unread img, tr.hl-tr .icon-newest { display: none !important; }
+    .torTopic { display: flex !important; align-items: center; gap: 8px; min-width: 0; }
+    .torTopic .tor-icon { font-size: 11px; opacity: .8; }
+    .torTopic .tor-icon.tor-approved { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(61,220,151,.14) !important; font-size: 10px; }
+    a.tt-text, a.torTopic {
+        font: 600 15px/1.35 var(--font) !important; color: var(--text) !important; overflow: hidden; text-overflow: ellipsis;
+    }
+    tr.hl-tr a.tt-text:visited { color: #a7a9b8 !important; }
+    a.tt-text:hover { color: #fff !important; }
+    .topicAuthor, .topicAuthor a { color: var(--faint) !important; font-size: 12px !important; font-weight: 400 !important; }
+    .rtm-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .rtm-chip {
+        font: 600 11px/1 var(--font); padding: 4px 7px; border-radius: 6px; color: var(--muted) !important;
+        background: var(--surface-3) !important; border: 1px solid var(--line) !important; white-space: nowrap;
+    }
+    .rtm-chip.year { color: #cfc8ff !important; background: rgba(139,123,255,.14) !important; border-color: rgba(139,123,255,.25) !important; }
+    .rtm-chip.lic  { color: #8ff0c4 !important; background: rgba(61,220,151,.12) !important; border-color: rgba(61,220,151,.25) !important; }
+    .rtm-chip.rep  { color: #ffd38a !important; background: rgba(255,181,71,.12) !important; border-color: rgba(255,181,71,.25) !important; }
+    .rtm-chip.lang { color: #9fe3fb !important; background: rgba(57,198,244,.10) !important; border-color: rgba(57,198,244,.22) !important; }
+    .rtm-chip.genre { color: #d9dbe6 !important; }
+    .rtm-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; color: var(--faint); font-size: 12px; }
+
+    td.vf-col-tor { text-align: right !important; }
+    td.vf-col-tor .seedmed, td.vf-col-tor .leechmed {
+        display: inline-flex; align-items: center; gap: 3px; font: 700 12px var(--font) !important;
+        padding: 3px 8px; border-radius: 99px;
+    }
+    td.vf-col-tor .seedmed { background: rgba(61,220,151,.12) !important; }
+    td.vf-col-tor .leechmed { background: rgba(255,181,71,.12) !important; }
+    td.vf-col-tor .seedmed::before { content: "▲"; font-size: 8px; }
+    td.vf-col-tor .leechmed::before { content: "▼"; font-size: 8px; }
+    td.vf-col-tor span.med { display: none; }
+    td.vf-col-tor .small { margin-top: 6px; }
+    td.vf-col-tor a.f-dl, td.vf-col-tor a.dl-stub { color: var(--text) !important; font: 600 13px var(--font) !important; }
+    tr.hl-tr td, tr.hl-tr td * { font-family: var(--font) !important; }
+    td.vf-col-replies { text-align: center !important; color: var(--muted) !important; font-size: 12px !important; }
+    td.vf-col-replies p { margin: 0 !important; }
+    td.vf-col-replies p.med b { color: var(--text); font-weight: 600; }
+    td.vf-col-replies p.med b::after { content: " ⤓"; color: var(--faint); font-weight: 400; }
+    td.vf-col-replies p:first-child { display: none; }
+    td.vf-col-last-post { text-align: right !important; color: var(--muted) !important; font-size: 12px !important; }
+    td.vf-col-last-post p { margin: 0 !important; }
+    td.vf-col-last-post img { display: none; }
+    td.vf-col-last-post a { color: var(--faint) !important; }
+
+    /* кнопка «скрыть» в карточке */
+    .rtm-hide {
+        justify-self: center; transform: scale(.9); opacity: 0; margin: 0 !important;
+        width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line-2) !important;
+        background: var(--surface-3) !important; color: var(--muted) !important; cursor: pointer; padding: 0 !important;
+        display: grid; place-items: center; transition: opacity .15s, transform .15s, background .15s, color .15s;
+    }
+    tr.hl-tr:hover .rtm-hide { opacity: 1; transform: scale(1); }
+    .rtm-hide:hover { background: rgba(255,92,122,.16) !important; color: var(--red) !important; border-color: rgba(255,92,122,.35) !important; }
+    .rtm-hide svg { width: 16px; height: 16px; }
+
+    tr.hl-tr.rtm-hidden { display: none !important; }
+    body.rtm-show-hidden tr.hl-tr.rtm-hidden { display: grid !important; opacity: .38; }
+    body.rtm-show-hidden tr.hl-tr.rtm-hidden:hover { opacity: .8; }
+    tr.hl-tr.rtm-hidden .rtm-hide { display: none; }
+    tr.hl-tr .rtm-unhide { display: none; }
+    body.rtm-show-hidden tr.hl-tr.rtm-hidden .rtm-unhide {
+        display: inline-flex; margin-left: 8px; font: 600 11px var(--font); color: var(--accent) !important; cursor: pointer;
+        background: rgba(139,123,255,.12) !important; padding: 3px 8px; border-radius: 6px; white-space: nowrap;
+    }
+    tr.hl-tr.rtm-leaving { opacity: 0; transform: translateX(14px); }
+    tr.hl-tr.rtm-new { animation: rtmIn .35s ease both; }
+    @keyframes rtmIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* панель над списком */
+    .rtm-bar {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 10px;
+        padding: 10px 12px; background: var(--surface) !important; border: 1px solid var(--line) !important; border-radius: var(--r);
+    }
+    .rtm-bar .rtm-stat { color: var(--muted); font-size: 13px; margin-right: auto; }
+    .rtm-bar .rtm-stat b { color: var(--text); }
+    .rtm-btn {
+        display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: var(--r-sm);
+        border: 1px solid var(--line-2) !important; background: var(--surface-3) !important; color: var(--text) !important;
+        font: 600 13px var(--font) !important; cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
+    }
+    .rtm-btn:hover { border-color: rgba(139,123,255,.5) !important; background: #232839 !important; }
+    .rtm-btn:active { transform: translateY(1px); }
+    .rtm-btn.primary { background: var(--grad) !important; border: 0 !important; color: #fff !important; }
+    .rtm-btn.on { border-color: var(--accent) !important; color: #cfc8ff !important; }
+    .rtm-btn svg { width: 15px; height: 15px; }
+    .rtm-badge { background: rgba(255,255,255,.1) !important; padding: 1px 7px; border-radius: 99px; font-size: 11px; }
+    .rtm-more { display: flex; justify-content: center; margin: 16px 0; }
+    .rtm-loading { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 8px; }
+    .rtm-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: rtmSpin .7s linear infinite; }
+    @keyframes rtmSpin { to { transform: rotate(360deg); } }
+
+    /* боковая панель фильтров */
+    .rtm-overlay { position: fixed; inset: 0; background: rgba(5,6,10,.55); backdrop-filter: blur(3px); z-index: 9998; opacity: 0; pointer-events: none; transition: opacity .2s; }
+    .rtm-drawer {
+        position: fixed; top: 0; right: 0; bottom: 0; width: 440px; max-width: 92vw; z-index: 9999;
+        background: var(--surface); border-left: 1px solid var(--line-2); box-shadow: -20px 0 60px rgba(0,0,0,.5);
+        transform: translateX(100%); transition: transform .25s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column;
+        font: 14px/1.5 var(--font); color: var(--text);
+    }
+    .rtm-open .rtm-overlay { opacity: 1; pointer-events: auto; }
+    .rtm-open .rtm-drawer { transform: none; }
+    .rtm-drawer header { display: flex; align-items: center; gap: 10px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+    .rtm-drawer header h2 { margin: 0; font: 700 18px var(--font); flex: 1; color: var(--text); }
+    .rtm-icon {
+        width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line-2) !important; background: var(--surface-3) !important;
+        color: var(--muted) !important; cursor: pointer; display: grid; place-items: center; padding: 0 !important;
+    }
+    .rtm-icon:hover { color: var(--text) !important; }
+    .rtm-icon svg { width: 16px; height: 16px; }
+    .rtm-sec { padding: 14px 20px; border-bottom: 1px solid var(--line); }
+    .rtm-sec h3 { margin: 0 0 10px; font: 600 11px var(--font); color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+    .rtm-add { display: flex; gap: 8px; }
+    .rtm-input {
+        flex: 1; height: 36px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--line-2); outline: none;
+        background: var(--surface-2); color: var(--text); font: 14px var(--font); min-width: 0;
+    }
+    .rtm-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,123,255,.2); }
+    .rtm-seg { display: flex; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-sm); padding: 3px; margin-top: 8px; width: max-content; }
+    .rtm-seg button { border: 0 !important; background: transparent !important; color: var(--muted) !important; font: 600 12px var(--font) !important; padding: 5px 10px !important; border-radius: 6px !important; cursor: pointer; }
+    .rtm-seg button.on { background: var(--surface-3) !important; color: var(--text) !important; }
+    .rtm-hint { color: var(--faint); font-size: 12px; margin-top: 8px; }
+    .rtm-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+    .rtm-list { flex: 1; overflow-y: auto; padding: 6px 12px 16px; }
+    .rtm-rule {
+        display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); transition: background .12s;
+    }
+    .rtm-rule:hover { background: var(--surface-2); }
+    .rtm-rule .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rtm-rule .k { font: 600 10px var(--font); color: var(--accent-2); background: rgba(57,198,244,.1); padding: 2px 6px; border-radius: 5px; text-transform: uppercase; }
+    .rtm-rule .c { font: 600 11px var(--font); color: var(--muted); }
+    .rtm-rule button { opacity: 0; border: 0 !important; background: transparent !important; color: var(--muted) !important; cursor: pointer; padding: 4px !important; border-radius: 6px; display: grid; }
+    .rtm-rule:hover button { opacity: 1; }
+    .rtm-rule button:hover { color: var(--red) !important; background: rgba(255,92,122,.12) !important; }
+    .rtm-rule button svg { width: 14px; height: 14px; }
+    .rtm-empty { color: var(--faint); text-align: center; padding: 30px 10px; }
+    .rtm-foot { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); }
+    .rtm-foot .rtm-btn { flex: 1; justify-content: center; }
+
+    /* всплывашка с «Отменить» */
+    .rtm-toast {
+        position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; z-index: 10000;
+        display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 16px; border-radius: 12px;
+        background: #1f2433; border: 1px solid var(--line-2); box-shadow: var(--shadow); color: var(--text);
+        font: 500 14px var(--font); transition: opacity .2s, transform .2s; max-width: 80vw;
+    }
+    .rtm-toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .rtm-toast .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ------------------------------------------------ страница раздачи (viewtopic) */
+    #topic_main { background: transparent !important; border: 0 !important; box-shadow: none !important; border-spacing: 0 12px !important; }
+    #topic_main > tbody > tr > td { border: 0 !important; }
+    #topic_main > tbody[id^="post_"] > tr > td, #topic_main > tbody.row1 > tr > td, #topic_main > tbody.row2 > tr > td { background: var(--surface) !important; }
+    #topic_main > tbody > tr:first-child > td:first-child { border-top-left-radius: var(--r); }
+    #topic_main > tbody > tr:first-child > td:last-child { border-top-right-radius: var(--r); }
+    #topic_main > tbody > tr:last-child > td:first-child { border-bottom-left-radius: var(--r); }
+    #topic_main > tbody > tr:last-child > td:last-child { border-bottom-right-radius: var(--r); }
+    #topic_main > tbody > tr:not(:first-child) > td { border-top: 1px solid var(--line) !important; }
+    fieldset { border: 1px solid var(--line-2) !important; border-radius: var(--r) !important; }
+    fieldset legend { color: var(--muted) !important; padding: 0 6px; }
+    td.poster_info { width: 150px !important; padding: 16px !important; color: var(--muted) !important; font-size: 12px !important; border-right: 1px solid var(--line) !important; }
+    td.poster_info .nick, td.poster_info .nick a { color: var(--text) !important; font: 700 14px var(--font) !important; }
+    td.poster_info img { border-radius: 10px; max-width: 100px; height: auto; }
+    td.message { padding: 16px 20px !important; }
+    .post_head { color: var(--faint) !important; font-size: 12px !important; border-bottom: 1px solid var(--line) !important; padding-bottom: 8px !important; margin-bottom: 12px; }
+    .post_body { font: 15px/1.65 var(--font) !important; color: #d6d9e3 !important; max-width: 1100px; }
+    .post_body .post-b { color: var(--text); }
+    .post_body var.postImg, .post_body img.postImg { border-radius: 10px; }
+    .post_body .postImgAligned.img-right { margin-left: 18px !important; }
+    .post_body hr, .post-hr { border: 0 !important; border-top: 1px solid var(--line) !important; }
+    .post_body .q-wrap, .post_body .q {
+        background: var(--surface-2) !important; border: 0 !important; border-left: 3px solid var(--accent) !important;
+        border-radius: var(--r-sm); padding: 10px 14px !important;
+    }
+    .post_body .c-wrap, .post_body .c-body, .post_body pre {
+        background: #0c0e14 !important; border: 1px solid var(--line) !important; border-radius: var(--r-sm);
+        font: 13px/1.5 "Cascadia Code", Consolas, monospace !important; color: #cdd3e4 !important;
+    }
     .sp-wrap {
-        background: var(--background-card);
-        border-radius: 12px;
-        overflow: hidden;
-        border: 1px solid var(--border-color);
-        margin-bottom: 15px;
+        background: var(--surface-2) !important; border: 1px solid var(--line) !important; border-radius: var(--r-sm) !important;
+        margin: 8px 0 !important; overflow: hidden; width: auto !important;
     }
-
     .sp-head {
-        background: rgba(37, 38, 69, 0.5);
-        padding: 15px 20px;
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+        background: transparent !important; padding: 10px 14px !important; cursor: pointer; border: 0 !important;
+        font: 600 14px var(--font) !important; color: var(--text) !important; display: flex !important; align-items: center; gap: 8px;
     }
+    .sp-head::before { content: "›"; display: inline-block; transition: transform .15s; color: var(--muted); font-size: 18px; line-height: 1; }
+    .sp-head.unfolded::before { transform: rotate(90deg); }
+    .sp-head:hover { background: var(--surface-3) !important; }
+    .sp-head, .sp-head * { color: var(--text) !important; }
+    .sp-body { padding: 12px 16px !important; border-top: 1px solid var(--line) !important; background: transparent !important; }
 
-    .sp-head span {
-        color: var(--text-primary);
-        font-weight: 600;
+    /* блок скачивания */
+    table.attach {
+        background: var(--surface-2) !important; border: 1px solid rgba(139,123,255,.25) !important; border-radius: var(--r) !important;
+        overflow: hidden; margin: 14px 0 !important; border-collapse: separate !important; box-shadow: 0 0 0 4px rgba(139,123,255,.05);
     }
-
-    .sp-body {
-        padding: 20px;
-        background: rgba(27, 28, 49, 0.4);
-        color: var(--text-primary);
+    table.attach td { padding: 6px 14px !important; color: var(--muted); }
+    table.attach tr.row3 td { background: transparent !important; color: var(--faint) !important; font-size: 12px !important; font-weight: 500 !important; }
+    table.attach a.dl-link {
+        display: inline-flex !important; align-items: center; gap: 8px; padding: 9px 16px !important; border-radius: var(--r-sm);
+        background: var(--grad) !important; color: #fff !important; font: 700 14px var(--font) !important; box-shadow: 0 6px 18px rgba(139,123,255,.3);
     }
+    table.attach a.dl-link:hover { filter: brightness(1.1); }
+    table.attach a.magnet-link, table.attach a.magnet-link-16 { color: var(--accent-2) !important; font-weight: 600; }
+    #tor-size-humn, table.attach b { color: var(--text) !important; }
 
+    /* лишнее (как в 1.0) */
+    #post-msg-form, #thx-btn-div, #forum-moderators, #nav-panel, #jumpbox-wrap, #footer-info-links,
+    #bn-top-right, .bn-idx, #idx-sidebar2 .bn-idx, a.t-is-unread > img { display: none !important; }
     `);
 
-    // Загружаем список скрытых раздач
-    function loadHiddenTorrents() {
-        return GM_getValue('hiddenTorrents', {});
-    }
+    // ------------------------------------------------------------------ утилиты
+    const $ = (s, r = document) => r.querySelector(s);
+    const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+    const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const ICON = {
+        eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+        eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+        filter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
+        x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    };
 
-    // Сохраняем список скрытых раздач
-    function saveHiddenTorrents() {
-        GM_setValue('hiddenTorrents', hiddenTorrents);
-    }
+    // название игры из заголовка: «[DL] Name / Alt [L] [RUS] (2025)» → «Name / Alt»
+    const gameName = title => {
+        const m = title.match(/^\s*(?:\[[^\]]*\]\s*)*([^[(]+)/);
+        return m ? m[1].trim().replace(/\s+/g, ' ') : title.trim();
+    };
+    const norm = s => s.toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, ' ').trim();
+    const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    // Добавляем кнопку управления фильтрами
-    const addFilterButton = () => {
-        // Ищем разные возможные места для вставки кнопки
-        const navTop = document.querySelector('.nav-top') ||
-              document.querySelector('.nav') ||
-              document.querySelector('.forumline');
-
-        if (!navTop) return; // Если ничего не найдено, выходим
-
-        const hiddenCount = Object.keys(hiddenTorrents).length;
-        const filterButton = document.createElement('button');
-        filterButton.id = 'show-filter-modal';
-        filterButton.innerHTML = `Фильтры ${hiddenCount > 0 ? `<span class="filter-counter">${hiddenCount}</span>` : ''}`;
-        filterButton.addEventListener('click', showFilterModal);
-
-        // Вставляем кнопку в зависимости от найденного элемента
-        if (navTop.classList.contains('forumline')) {
-            // Если это таблица форума, добавляем перед ней
-            navTop.parentNode.insertBefore(filterButton, navTop);
-        } else {
-            // В остальных случаях, пробуем вставить как раньше
-            navTop.parentNode.insertBefore(filterButton, navTop);
+    let matcherCache = null;
+    const buildMatcher = () => {
+        const names = new Map();               // norm(name) -> rule key
+        const words = [];                      // [key, RegExp] — целым словом (старые правила)
+        const kws = [];                        // [key, lowercase text] — где угодно
+        for (const [k, v] of Object.entries(rules)) {
+            if (v.kw) { kws.push([k, k.toLowerCase()]); continue; }
+            names.set(norm(k), k);
+            words.push([k, new RegExp('(^|[^\\p{L}\\p{N}])' + reEsc(k) + '($|[^\\p{L}\\p{N}])', 'u')]);
         }
+        matcherCache = { names, words, kws };
+    };
+    const matchRule = title => {
+        if (!matcherCache) buildMatcher();
+        const { names, words, kws } = matcherCache;
+        const name = gameName(title);
+        const full = norm(name);
+        if (names.has(full)) return names.get(full);
+        for (const part of name.split(/\s+\/\s+/)) { const p = norm(part); if (names.has(p)) return names.get(p); }
+        const low = title.toLowerCase();
+        for (const [k, w] of kws) if (low.includes(w)) return k;
+        for (const [k, re] of words) if (re.test(title)) return k;
+        return null;
     };
 
-    // Создаем модальное окно для управления фильтрами
-    const createFilterModal = () => {
-        const modal = document.createElement('div');
-        modal.id = 'filter-modal';
-
-        const content = document.createElement('div');
-        content.id = 'filter-content';
-
-        const header = document.createElement('div');
-        header.id = 'filter-header';
-
-        const title = document.createElement('h2');
-        title.textContent = 'Управление фильтрами';
-
-        const closeBtn = document.createElement('button');
-        closeBtn.id = 'filter-close';
-        closeBtn.innerHTML = '&times;';
-        closeBtn.addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-
-        header.appendChild(title);
-        header.appendChild(closeBtn);
-
-        const rulesSection = document.createElement('div');
-        rulesSection.id = 'filter-rules';
-
-        const rulesTitle = document.createElement('h3');
-        rulesTitle.textContent = 'Активные фильтры:';
-        rulesSection.appendChild(rulesTitle);
-
-        const rulesList = document.createElement('div');
-        rulesList.id = 'rules-list';
-
-        // Добавление предустановленных фильтров
-        const addPresetSection = document.createElement('div');
-        addPresetSection.innerHTML = `
-            <h3>Предустановленные фильтры:</h3>
-            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
-                <button id="filter-jpn" class="preset-filter-btn">Скрыть торренты с JPN</button>
-                <button id="filter-scene" class="preset-filter-btn">Скрыть [Scene]</button>
-                <button id="filter-portable" class="preset-filter-btn">Скрыть [Portable]</button>
-            </div>
-        `;
-
-        // Добавление произвольного фильтра
-        const addFilterForm = document.createElement('div');
-        addFilterForm.innerHTML = `
-            <h3>Добавить новый фильтр:</h3>
-            <div id="add-filter-form">
-                <input type="text" id="new-filter" placeholder="Введите текст для фильтрации...">
-                <button id="add-filter-btn">Добавить</button>
-            </div>
-        `;
-
-        // Собираем модальное окно
-        content.appendChild(header);
-        content.appendChild(rulesSection);
-        rulesSection.appendChild(rulesList);
-        content.appendChild(addPresetSection);
-        content.appendChild(addFilterForm);
-        modal.appendChild(content);
-
-        document.body.appendChild(modal);
-
-        // Добавляем обработчики для предустановленных фильтров
-        document.getElementById('filter-jpn').addEventListener('click', () => {
-            addFilter('JPN');
-            updateRulesList();
-            applyFilters();
-        });
-
-        document.getElementById('filter-scene').addEventListener('click', () => {
-            addFilter('[Scene]');
-            updateRulesList();
-            applyFilters();
-        });
-
-        document.getElementById('filter-portable').addEventListener('click', () => {
-            addFilter('[Portable]');
-            updateRulesList();
-            applyFilters();
-        });
-
-        // Обработчик для добавления произвольного фильтра
-        document.getElementById('add-filter-btn').addEventListener('click', () => {
-            const newFilter = document.getElementById('new-filter').value.trim();
-            if (newFilter) {
-                addFilter(newFilter);
-                document.getElementById('new-filter').value = '';
-                updateRulesList();
-                applyFilters();
-            }
-        });
-
-        // Закрытие модального окна при клике вне содержимого
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-
-        return modal;
-    };
-
-    // Показываем модальное окно фильтров
-    const showFilterModal = () => {
-        updateRulesList();
-        const modal = document.getElementById('filter-modal');
-        modal.style.display = 'flex';
-    };
-
-    // Обновляем список правил в модальном окне
-    const updateRulesList = () => {
-        const rulesList = document.getElementById('rules-list');
-        rulesList.innerHTML = '';
-
-        const hiddenCount = Object.keys(hiddenTorrents).length;
-
-        if (hiddenCount === 0) {
-            rulesList.innerHTML = '<div class="empty-rules">Нет активных фильтров</div>';
-            return;
+    // ------------------------------------------------------------------ список раздач
+    const CHIP_RULES = [
+        [/^(19|20)\d\d$/, 'year'], [/^L$/, 'lic', 'Лицензия'], [/^P$/, 'rep', 'Пиратка'], [/^RePack/i, 'rep'],
+        [/^(GOG|Steam|Steam-Rip|EGS|Epic)/i, 'lic'], [/(RUS|ENG|JPN|MULTI|UKR|GER|CHI)/, 'lang'],
+    ];
+    const chipsFromTitle = title => {
+        const out = [];
+        const tags = [...title.matchAll(/\[([^\]]+)\]|\(([^)]+)\)/g)].map(m => (m[1] || m[2]).trim());
+        const parts = [];                                   // [текст, принудительный класс]
+        for (const t of tags) {
+            const y = t.match(/^((?:19|20)\d\d)\s*,\s*(.+)$/);  // «2026, RPG» → год + жанр
+            if (y) parts.push([y[1], 'year'], [y[2], 'genre']); else parts.push([t, '']);
         }
-
-        for (const [key, value] of Object.entries(hiddenTorrents)) {
-            const ruleItem = document.createElement('div');
-            ruleItem.className = 'filter-rule';
-
-            const ruleText = document.createElement('span');
-            ruleText.textContent = `"${key}" (скрыто: ${value.count})`;
-
-            const removeBtn = document.createElement('button');
-            removeBtn.className = 'remove-rule';
-            removeBtn.textContent = 'Удалить';
-            removeBtn.dataset.rule = key;
-            removeBtn.addEventListener('click', () => {
-                removeFilter(key);
-                updateRulesList();
-                applyFilters();
-            });
-
-            ruleItem.appendChild(ruleText);
-            ruleItem.appendChild(removeBtn);
-            rulesList.appendChild(ruleItem);
+        for (const [t, forced] of parts) {
+            if (/^DL$/i.test(t) || /^\d{6,}$/.test(t)) continue;  // номера сборок Steam — шум
+            let cls = forced, label = t;
+            if (!cls) for (const [re, c, l] of CHIP_RULES) if (re.test(t)) { cls = c; if (l) label = l; break; }
+            out.push(`<span class="rtm-chip ${cls}">${esc(label)}</span>`);
         }
+        return out.slice(0, 7).join('');
     };
 
-    // Добавляем фильтр
-    const addFilter = (filterText) => {
-        if (!hiddenTorrents[filterText]) {
-            hiddenTorrents[filterText] = { count: 0 };
+    const processRow = row => {
+        if (row.dataset.rtm) return;
+        row.dataset.rtm = '1';
+        const a = $('a.tt-text', row);
+        if (!a) return;
+        const title = a.dataset.full || a.textContent.trim();
+        a.dataset.full = title;
+        a.title = title;
+        a.textContent = gameName(title);
+        const topic = a.parentElement.closest('div.torTopic') || a.parentElement;   // у самой ссылки тоже класс torTopic
+        for (const n of [...topic.childNodes]) if (n.nodeType === 3 && /^[\s·•|]*$/.test(n.textContent)) n.remove();   // «·» между значком и названием
+        const chips = chipsFromTitle(title);
+        if (chips && !$('.rtm-chips', row)) topic.insertAdjacentElement('afterend', el('div', 'rtm-chips', chips));
+        // старые иконки → компактные значки
+        const icon = $('td.vf-col-icon', row);
+        if (icon) {
+            const img = $('img.topic_icon', icon);
+            const src = img ? img.getAttribute('src') || '' : '';
+            if (/sticky|announce/.test(src)) icon.insertAdjacentHTML('beforeend', '📌');
+            else if (/lock/.test(src)) icon.insertAdjacentHTML('beforeend', '🔒');
+            else if (/_new/.test(src) || $('.t-is-unread', row)) icon.insertAdjacentHTML('beforeend', '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)"></span>');
         }
-        saveHiddenTorrents();
+        $$('span.ttp-label.ttp-hot', row).forEach(l => { l.textContent = '🔥'; l.style.cssText = 'background:none;padding:0;font-size:15px'; });
+        $$('span.topicPoll', row).forEach(l => { l.textContent = '📊'; });
+        if (!isTor(row)) return;
+        const hide = el('button', 'rtm-hide', ICON.eyeOff);
+        hide.title = 'Скрыть эту игру';
+        hide.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); hideGame(row); });
+        row.appendChild(hide);
+        const unhide = el('span', 'rtm-unhide', 'Показать снова');
+        unhide.addEventListener('click', e => { e.preventDefault(); removeRule(row.dataset.rule); });
+        topic.appendChild(unhide);
     };
 
-    // Удаляем фильтр
-    const removeFilter = (filterText) => {
-        delete hiddenTorrents[filterText];
-        saveHiddenTorrents();
+    const tbody = () => $('table.vf-tor > tbody') || $('table.vf-table > tbody');
+    const isTor = r => !!$('a.tt-text', r) && !!$('a.f-dl, a.dl-stub, .seedmed', r);   // раздача, а не закреплённая тема
+    const torRows = () => $$('tr.hl-tr').filter(isTor);
 
-        // Показываем ранее скрытые торренты
-        document.querySelectorAll('.hidden-torrent').forEach(row => {
-            if (row.dataset.hiddenBy === filterText) {
-                row.classList.remove('hidden-torrent');
-                delete row.dataset.hiddenBy;
-            }
-        });
-
-        // Обновляем счетчик на кнопке
-        updateFilterCounter();
-    };
-
-    // Применяем фильтры ко всем торрентам
     const applyFilters = () => {
-        // Сбрасываем счетчики
-        for (const key in hiddenTorrents) {
-            hiddenTorrents[key].count = 0;
+        matcherCache = null;
+        for (const k in rules) rules[k].count = 0;
+        let hidden = 0;
+        for (const row of torRows()) {
+            const k = matchRule($('a.tt-text', row).dataset.full || $('a.tt-text', row).textContent);
+            row.classList.toggle('rtm-hidden', !!k);
+            if (k) { row.dataset.rule = k; rules[k].count++; hidden++; } else delete row.dataset.rule;
         }
-
-        // Получаем все строки с торрентами
-        const torrentRows = document.querySelectorAll('tr.hl-tr');
-
-        torrentRows.forEach(row => {
-            // Сначала отображаем все строки
-            row.classList.remove('hidden-torrent');
-            delete row.dataset.hiddenBy;
-
-            // Получаем название торрента
-            const titleElement = row.querySelector('.torTopic a.tt-text');
-            if (!titleElement) return;
-
-            const title = titleElement.textContent;
-
-            // Проверяем все фильтры
-            for (const [filterText, filterData] of Object.entries(hiddenTorrents)) {
-                if (title.includes(filterText)) {
-                    row.classList.add('hidden-torrent');
-                    row.dataset.hiddenBy = filterText;
-                    hiddenTorrents[filterText].count++;
-                    break; // Прерываем цикл, т.к. уже скрыли торрент
-                }
-            }
-        });
-
-        // Сохраняем обновленные данные
-        saveHiddenTorrents();
-
-        // Обновляем счетчик на кнопке
-        updateFilterCounter();
+        updateBar(hidden);
+        return hidden;
     };
 
-    // Обновляем счетчик на кнопке вызова фильтров
-    const updateFilterCounter = () => {
-        const filterButton = document.getElementById('show-filter-modal');
-        if (!filterButton) return;
+    let bar, statEl, toggleBtn, filtersBtn, moreWrap;
+    const visibleCount = () => torRows().filter(r => !r.classList.contains('rtm-hidden')).length;
+    const updateBar = hidden => {
+        if (!bar) return;
+        const total = torRows().length;
+        hidden = hidden ?? torRows().filter(r => r.classList.contains('rtm-hidden')).length;
+        statEl.innerHTML = `Показано <b>${total - hidden}</b> из ${total}` + (hidden ? ` · скрыто <b>${hidden}</b>` : '') +
+            (pagesLoaded > 1 ? ` · страниц: <b>${pagesLoaded}</b>` : '');
+        toggleBtn.innerHTML = (showHidden ? ICON.eye : ICON.eyeOff) + (showHidden ? 'Скрытые видны' : 'Показать скрытые');
+        toggleBtn.classList.toggle('on', showHidden);
+        filtersBtn.innerHTML = `${ICON.filter}Фильтры <span class="rtm-badge">${Object.keys(rules).length}</span>`;
+    };
 
-        const hiddenCount = Object.keys(hiddenTorrents).length;
+    const buildBar = () => {
+        const table = $('table.vf-tor') || $('table.vf-table');
+        if (!table) return;
+        bar = el('div', 'rtm-bar');
+        statEl = el('div', 'rtm-stat');
+        toggleBtn = el('button', 'rtm-btn');
+        toggleBtn.addEventListener('click', () => {
+            showHidden = !showHidden; GM_setValue('rtShowHidden', showHidden);
+            document.body.classList.toggle('rtm-show-hidden', showHidden); updateBar();
+        });
+        filtersBtn = el('button', 'rtm-btn');
+        filtersBtn.addEventListener('click', openDrawer);
+        bar.append(statEl, toggleBtn, filtersBtn);
+        table.parentNode.insertBefore(bar, table);
+        moreWrap = el('div', 'rtm-more');
+        table.parentNode.insertBefore(moreWrap, table.nextSibling);
+        document.body.classList.toggle('rtm-show-hidden', showHidden);
+    };
 
-        if (hiddenCount > 0) {
-            filterButton.innerHTML = `Фильтры <span class="filter-counter">${hiddenCount}</span>`;
-        } else {
-            filterButton.textContent = 'Фильтры';
+    // ---------------- автоподгрузка следующих страниц
+    let nextUrl = null, pagesLoaded = 1, loading = false;
+    const findNext = doc => {
+        const a = $$('a.pg', doc).find(x => /След/.test(x.textContent));
+        return a ? new URL(a.getAttribute('href'), location.href).href : null;
+    };
+    const renderMore = () => {
+        if (!moreWrap) return;
+        moreWrap.innerHTML = '';
+        if (loading) { moreWrap.append(el('span', 'rtm-loading', '<span class="rtm-spin"></span>Загружаю следующую страницу…')); return; }
+        if (!nextUrl) return;
+        const b = el('button', 'rtm-btn', 'Загрузить ещё');
+        b.addEventListener('click', () => loadNext());
+        moreWrap.append(b);
+    };
+    const loadNext = async () => {
+        if (loading || !nextUrl) return false;
+        loading = true; renderMore();
+        try {
+            const resp = await fetch(nextUrl, { credentials: 'include' });
+            const buf = await resp.arrayBuffer();     // сайт в windows-1251 — .text() испортил бы кириллицу
+            const cs = ((resp.headers.get('content-type') || '').match(/charset=([\w-]+)/i) || [])[1] || document.characterSet || 'windows-1251';
+            const html = new TextDecoder(cs).decode(buf);
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const rows = $$('tr.hl-tr', doc).filter(r => isTor(r) && !document.getElementById(r.id));
+            const body = tbody();
+            for (const r of rows) {
+                const node = document.importNode(r, true);
+                node.classList.add('rtm-new');
+                body.appendChild(node);
+                processRow(node);
+            }
+            nextUrl = findNext(doc);
+            pagesLoaded++;
+            applyFilters();
+            return true;
+        } catch (e) {
+            console.warn('[rtm] load next', e);
+            return false;
+        } finally {
+            loading = false; renderMore();
+        }
+    };
+    const autoFill = async () => {
+        while (!showHidden && visibleCount() < AUTOLOAD_MIN_VISIBLE && nextUrl && pagesLoaded < AUTOLOAD_MAX_PAGES) {
+            if (!(await loadNext())) break;
         }
     };
 
-    // Добавляем кнопки фильтрации к каждому торренту
-    const addFilterButtons = () => {
-        const torrentRows = document.querySelectorAll('tr.hl-tr');
-
-        torrentRows.forEach(row => {
-            const titleElement = row.querySelector('.torTopic a.tt-text');
-            if (!titleElement) return;
-
-            // Проверяем, не добавлена ли уже кнопка
-            if (row.querySelector('.filter-btn')) return;
-
-            const filterBtn = document.createElement('button');
-            filterBtn.className = 'filter-btn';
-            filterBtn.innerHTML = '−'; // Красный минус
-            filterBtn.title = 'Скрыть похожие раздачи';
-
-            filterBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const title = titleElement.textContent;
-
-                // Определяем имя раздачи для фильтрации
-                // Ищем текст между [DL] и [P] или [L]
-                const regex = /\[DL\]\s+([^[]+)/;
-                const match = title.match(regex);
-
-                if (match && match[1]) {
-                    const filterName = match[1].trim();
-                    addFilter(filterName);
-                    applyFilters();
-                    updateRulesList();
-                    alert(`Добавлен фильтр: "${filterName}"`);
-                } else {
-                    // Если не смогли найти по паттерну, предлагаем ввести вручную
-                    const userInput = prompt('Введите текст для фильтрации:', '');
-                    if (userInput) {
-                        addFilter(userInput.trim());
-                        applyFilters();
-                        updateRulesList();
-                    }
-                }
-            });
-
-            const torTopicDiv = titleElement.parentNode;
-            torTopicDiv.insertBefore(filterBtn, torTopicDiv.firstChild);
-        });
+    // ---------------- скрытие / правила
+    let toast, toastTimer;
+    const showToast = (text, undo) => {
+        if (!toast) { toast = el('div', 'rtm-toast'); document.body.appendChild(toast); }
+        toast.innerHTML = `<span class="t">${esc(text)}</span>`;
+        if (undo) {
+            const b = el('button', 'rtm-btn', 'Отменить');
+            b.addEventListener('click', () => { undo(); toast.classList.remove('show'); });
+            toast.appendChild(b);
+        }
+        requestAnimationFrame(() => toast.classList.add('show'));
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 5000);
     };
 
-    function replaceIconWithStar() {
-        const icons = document.querySelectorAll('.topic_icon[src$="folder_dl_new.gif"], .topic_icon[src$="folder_dl.gif"]');
-        icons.forEach(icon => {
-            const starSpan = document.createElement('span');
-            starSpan.textContent = '⭐';
-            starSpan.style.fontSize = '18px';
-            starSpan.style.marginRight = '5px';
+    const addRule = (text, kw = false) => {
+        text = text.trim();
+        if (!text || rules[text]) return false;
+        rules[text] = kw ? { count: 0, kw: true } : { count: 0 };
+        save(); return true;
+    };
+    const removeRule = key => {
+        if (!key || !rules[key]) return;
+        delete rules[key]; save(); applyFilters(); renderRules();
+        showToast(`Снова показываю: ${key}`, () => { rules[key] = { count: 0 }; save(); applyFilters(); renderRules(); });
+    };
+    const hideGame = row => {
+        const a = $('a.tt-text', row);
+        const name = gameName(a.dataset.full || a.textContent);
+        if (!addRule(name)) return;
+        row.classList.add('rtm-leaving');
+        setTimeout(() => { row.classList.remove('rtm-leaving'); applyFilters(); autoFill(); }, 180);
+        showToast(`Скрыто: ${name}`, () => { delete rules[name]; save(); applyFilters(); });
+    };
 
-            // Покраска в серый цвет для старой иконки
-            if (icon.src.includes('folder_dl.gif')) {
-                starSpan.style.filter = 'grayscale(100%)';
-                starSpan.style.color = 'gray';
-            }
-
-            icon.parentNode.insertBefore(starSpan, icon);
-            icon.remove();
+    // ---------------- панель фильтров
+    let drawerRoot, listEl, searchEl, addEl, addKw = false;
+    const renderRules = () => {
+        if (!listEl) return;
+        const q = norm(searchEl.value || '');
+        const items = Object.entries(rules)
+            .filter(([k]) => !q || norm(k).includes(q))
+            .sort((x, y) => (y[1].count || 0) - (x[1].count || 0) || x[0].localeCompare(y[0]));
+        listEl.innerHTML = '';
+        if (!items.length) { listEl.append(el('div', 'rtm-empty', q ? 'Ничего не найдено' : 'Фильтров пока нет')); return; }
+        const frag = document.createDocumentFragment();
+        for (const [k, v] of items.slice(0, 400)) {
+            const r = el('div', 'rtm-rule',
+                `<span class="t" title="${esc(k)}">${esc(k)}</span>${v.kw ? '<span class="k">слово</span>' : ''}` +
+                (v.count ? `<span class="c">${v.count} на стр.</span>` : '') + `<button title="Удалить">${ICON.x}</button>`);
+            r.querySelector('button').addEventListener('click', () => removeRule(k));
+            frag.append(r);
+        }
+        if (items.length > 400) frag.append(el('div', 'rtm-empty', `…и ещё ${items.length - 400}. Уточни поиск.`));
+        listEl.append(frag);
+    };
+    const buildDrawer = () => {
+        drawerRoot = el('div', '');
+        drawerRoot.innerHTML = `
+          <div class="rtm-overlay"></div>
+          <aside class="rtm-drawer">
+            <header><h2>Фильтры</h2><button class="rtm-icon" data-close title="Закрыть">${ICON.x}</button></header>
+            <div class="rtm-sec">
+              <h3>Добавить</h3>
+              <div class="rtm-add"><input class="rtm-input" data-add placeholder="Название игры или слово…"><button class="rtm-btn primary" data-addbtn>Скрыть</button></div>
+              <div class="rtm-seg"><button data-mode="name" class="on">Название</button><button data-mode="kw">Слово в заголовке</button></div>
+              <div class="rtm-hint" data-hint></div>
+            </div>
+            <div class="rtm-sec">
+              <h3>Быстрые</h3>
+              <div class="rtm-presets">${PRESETS.map(p => `<button class="rtm-btn" data-preset="${esc(p)}">Скрыть ${esc(p)}</button>`).join('')}</div>
+            </div>
+            <div class="rtm-sec" style="padding-bottom:10px"><input class="rtm-input" data-search placeholder="Поиск по фильтрам…" style="width:100%;box-sizing:border-box"></div>
+            <div class="rtm-list"></div>
+            <div class="rtm-foot"><button class="rtm-btn" data-export>Сохранить в файл</button><button class="rtm-btn" data-import>Загрузить из файла</button></div>
+          </aside>`;
+        document.body.appendChild(drawerRoot);
+        listEl = $('.rtm-list', drawerRoot);
+        searchEl = $('[data-search]', drawerRoot);
+        addEl = $('[data-add]', drawerRoot);
+        const hint = $('[data-hint]', drawerRoot);
+        const setMode = kw => {
+            addKw = kw;
+            $$('.rtm-seg button', drawerRoot).forEach(b => b.classList.toggle('on', (b.dataset.mode === 'kw') === kw));
+            hint.textContent = kw ? 'Скроет все раздачи, где это встречается в заголовке (например «JPN», «[Portable]»).'
+                                  : 'Скроет игру с точно таким названием.';
+        };
+        setMode(false);
+        $$('.rtm-seg button', drawerRoot).forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode === 'kw')));
+        const doAdd = () => {
+            if (addRule(addEl.value, addKw)) { addEl.value = ''; applyFilters(); renderRules(); autoFill(); }
+        };
+        $('[data-addbtn]', drawerRoot).addEventListener('click', doAdd);
+        addEl.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
+        searchEl.addEventListener('input', renderRules);
+        $$('[data-preset]', drawerRoot).forEach(b => b.addEventListener('click', () => {
+            if (addRule(b.dataset.preset, true)) { applyFilters(); renderRules(); autoFill(); }
+        }));
+        $('[data-close]', drawerRoot).addEventListener('click', closeDrawer);
+        $('.rtm-overlay', drawerRoot).addEventListener('click', closeDrawer);
+        $('[data-export]', drawerRoot).addEventListener('click', () => {
+            const blob = new Blob([JSON.stringify(rules, null, 1)], { type: 'application/json' });
+            const a = el('a'); a.href = URL.createObjectURL(blob); a.download = 'rutracker-filters.json'; a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         });
-
-        // Замена иконки закрепленной темы на предупреждение
-        const stickyIcons = document.querySelectorAll('.topic_icon[src$="folder_sticky_new.gif"]');
-        stickyIcons.forEach(icon => {
-            const warningSpan = document.createElement('span');
-            warningSpan.textContent = '⚠️';
-            warningSpan.style.fontSize = '18px';
-            warningSpan.style.marginRight = '5px';
-
-            icon.parentNode.insertBefore(warningSpan, icon);
-            icon.remove();
-        });
-
-        // Замена иконки закрытой темы на замок
-        const lockedIcons = document.querySelectorAll('.topic_icon[src$="folder_lock.gif"]');
-        lockedIcons.forEach(icon => {
-            const lockSpan = document.createElement('span');
-            lockSpan.textContent = '🔒';
-            lockSpan.style.fontSize = '18px';
-            lockSpan.style.marginRight = '5px';
-
-            icon.parentNode.insertBefore(lockSpan, icon);
-            icon.remove();
-        });
-
-        // Замена иконки закрытой темы на замок
-        const lockedIcons2 = document.querySelectorAll('.topic_icon[src$="folder_announce.gif"]');
-        lockedIcons2.forEach(icon => {
-            const lockSpan2 = document.createElement('span');
-            lockSpan2.textContent = '⚠️';
-            lockSpan2.style.fontSize = '18px';
-            lockSpan2.style.marginRight = '5px';
-
-            icon.parentNode.insertBefore(lockSpan2, icon);
-            icon.remove();
-        });
-    }
-
-    function hideButton() {
-        const xpaths = [
-            '//*[@id="main_content_wrap"]/table[1]/tbody/tr/td[1]/table/tbody/tr/td[1]',
-            '//*[@id="main_content_wrap"]/table[4]/tbody/tr/td[1]/a',
-            '//*[@id="nav-panel"]',
-            '//*[@id="main_content_wrap"]/table[3]/tbody/tr[58]/td/form',
-            '//*[@id="jumpbox-wrap"]/select',
-            '//*[@id="footer-info-links"]',
-            '//*[@id="main_content_wrap"]/table[4]/tbody/tr/td[2]',
-            '//*[@id="page_footer"]/div[4]',
-            '//*[@id="main_content_wrap"]/div/div[3]/ul/li/a',
-            '//*[@id="main_content_wrap"]/table[1]/tbody/tr/td[1]/div[3]',
-            '//*[@id="main_content_wrap"]/table[1]/tbody/tr/td[1]/div[1]',
-            '//*[@id="main_content_wrap"]/table[2]'
-        ];
-
-        const selectors = [
-
-            'a.t-is-unread > img' // Универсальный селектор для всех подобных изображений
-        ];
-
-        xpaths.forEach(xpath => {
-            const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-
-            if (element) {
-                element.style.display = 'none';
-            }
-        });
-
-        selectors.forEach(selector => {
-            const elements = document.querySelectorAll(selector);
-
-            elements.forEach(element => {
-                element.style.display = 'none';
-            });
-        });
-    }
-
-    function replaceHotLabel() {
-        // Замена "горячей" метки
-        const hotLabels = document.querySelectorAll('span.ttp-label.ttp-hot');
-
-        hotLabels.forEach(label => {
-            label.textContent = '🔥';
-            label.style.fontSize = '18px';
-            label.style.position = 'static';
-        });
-
-        // Замена "Опрос"
-        const pollLabels = document.querySelectorAll('span.topicPoll');
-
-        pollLabels.forEach(label => {
-            label.textContent = '📑';
-            label.style.fontSize = '18px';
-        });
-    }
-
-    function hideElements() {
-        // Проверяем, что мы на странице торрента с параметром t=
-        if (window.location.href.includes('viewtopic.php?t=')) {
-            const xpaths = [
-                '//*[@id="main_content_wrap"]/div[1]',
-                '//*[@id="topic_main"]/tbody[1]',
-                '//*[@id="post-msg-form"]',
-                '//*[@id="show-filter-modal"]',
-                '//*[@id="forum-moderators"]',
-                '//*[@id="main_content_wrap"]/table[5]',
-                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[3]',
-                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[4]',
-                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[5]',
-                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[2]/td[1]',
-                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[2]/td[2]',
-                '//*[@id="p-50708427-1"]/table[1]/tbody/tr[1]',
-                '//*[@id="thx-btn-div"]',
-                '//*[@id="thx-block"]/div[2]'
-            ];
-
-            xpaths.forEach(xpath => {
+        $('[data-import]', drawerRoot).addEventListener('click', () => {
+            const inp = el('input'); inp.type = 'file'; inp.accept = '.json,application/json';
+            inp.addEventListener('change', async () => {
                 try {
-                    const element = document.evaluate(
-                        xpath,
-                        document,
-                        null,
-                        XPathResult.FIRST_ORDERED_NODE_TYPE,
-                        null
-                    ).singleNodeValue;
-
-                    if (element) {
-                        element.style.display = 'none';
-                    }
-                } catch (error) {
-                    console.error(`Error finding element with xpath: ${xpath}`, error);
-                }
+                    const data = JSON.parse(await inp.files[0].text());
+                    let n = 0;
+                    for (const [k, v] of Object.entries(data)) if (!rules[k]) { rules[k] = { count: 0, ...(v && v.kw ? { kw: true } : {}) }; n++; }
+                    save(); applyFilters(); renderRules(); showToast(`Добавлено фильтров: ${n}`);
+                } catch (e) { showToast('Не удалось прочитать файл'); }
             });
-        }
-    }
+            inp.click();
+        });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+    };
+    const openDrawer = () => {
+        if (!drawerRoot) buildDrawer();
+        renderRules();
+        document.documentElement.classList.add('rtm-open');
+        setTimeout(() => addEl.focus(), 200);
+    };
+    const closeDrawer = () => document.documentElement.classList.remove('rtm-open');
 
-
-
-    // Инициализация скрипта
-    const init = () => {
-        // Загружаем сохраненные фильтры
-        hiddenTorrents = loadHiddenTorrents();
-
-        // Создаем модальное окно
-        createFilterModal();
-
-        // Замена иконок
-        replaceIconWithStar();
-
-        // Добавляем кнопку управления фильтрами
-        addFilterButton();
-
-
-        hideElements();
-
-        //Замена меток
-        replaceHotLabel();
-
-        // Скрытие ненужного
-        hideButton();
-
-        // Добавляем кнопки фильтрации к торрентам
-        addFilterButtons();
-
-        // Применяем сохраненные фильтры
+    // ------------------------------------------------------------------ запуск
+    const initForum = () => {
+        if (!torRows().length) return;
+        torRows().forEach(processRow);
+        buildBar();
+        nextUrl = findNext(document);
         applyFilters();
-
-        // Обновляем список правил
-        updateRulesList();
+        renderMore();
+        autoFill();
+        // подгрузка при прокрутке до конца
+        if (moreWrap && 'IntersectionObserver' in window) {
+            new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadNext(); }, { rootMargin: '600px' }).observe(moreWrap);
+        }
     };
 
-    // Запускаем после загрузки DOM
-    document.addEventListener('DOMContentLoaded', init);
+    const initTopic = () => {
+        // спойлеры: отметка раскрытого состояния для стрелки
+        document.addEventListener('click', e => {
+            const h = e.target.closest('.sp-head');
+            if (h) setTimeout(() => h.classList.toggle('unfolded', !!(h.nextElementSibling && h.nextElementSibling.offsetParent)), 0);
+        }, true);
+    };
 
-    // Если DOM уже загружен, запускаем сразу
-    if (document.readyState === 'interactive' || document.readyState === 'complete') {
-        init();
-    }
+    const init = () => {
+        if (document.documentElement.dataset.rtmInit) return;
+        document.documentElement.dataset.rtmInit = '1';
+        if (IS_TOPIC) initTopic(); else initForum();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
 })();
